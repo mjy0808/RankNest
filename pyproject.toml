@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "app-game-potential-radar"
+version = "0.2.0"
+description = "A low-cost daily potential radar for global apps and games"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+app-radar = "app_radar.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["app_radar*"]

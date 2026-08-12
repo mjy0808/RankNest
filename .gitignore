@@ -209,6 +209,15 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+# RankNest runtime data and generated reports
+.DS_Store
+data/*.db
+data/*.db-*
+reports/*.html
+reports/*.txt
+reports/*.json
+!reports/.gitkeep
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

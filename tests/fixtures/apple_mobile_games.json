@@ -1,0 +1,26 @@
+{
+  "feed": {
+    "title": {"label": "iTunes Store: Top Free Applications in Games"},
+    "entry": [
+      {
+        "im:name": {"label": "Pocket Quest"},
+        "im:image": [
+          {"label": "https://example.com/55.png"},
+          {"label": "https://example.com/100.png"}
+        ],
+        "im:artist": {"label": "Pocket Studio"},
+        "id": {
+          "label": "https://apps.apple.com/us/app/id3003",
+          "attributes": {"im:id": "3003"}
+        },
+        "link": {
+          "attributes": {
+            "rel": "alternate",
+            "href": "https://apps.apple.com/us/app/pocket-quest/id3003"
+          }
+        },
+        "im:releaseDate": {"label": "2026-08-08T00:00:00-07:00"}
+      }
+    ]
+  }
+}

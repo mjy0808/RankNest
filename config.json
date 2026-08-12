@@ -1,0 +1,36 @@
+{
+  "report": {
+    "title": "全球潜力 App / 游戏日报",
+    "app_count": 8,
+    "mobile_game_count": 6,
+    "steam_game_count": 6,
+    "timezone": "Asia/Shanghai"
+  },
+  "apple": {
+    "enabled": true,
+    "markets": ["us", "gb", "de", "fr", "jp", "kr", "cn", "in", "br", "mx", "id", "au"],
+    "charts": ["top-free", "top-paid"],
+    "mobile_game_charts": ["top-free", "top-grossing"],
+    "limit": 100,
+    "workers": 6
+  },
+  "steam": {
+    "enabled": true,
+    "markets": ["us", "gb", "de", "jp", "kr", "br"],
+    "charts": ["topsellers", "popularnew"],
+    "limit": 100,
+    "workers": 4
+  },
+  "social": {
+    "hacker_news_enabled": true,
+    "lookback_hours": 48,
+    "max_stories": 3000
+  },
+  "network": {
+    "timeout_seconds": 25,
+    "retries": 2
+  },
+  "storage": {
+    "retention_days": 45
+  }
+}

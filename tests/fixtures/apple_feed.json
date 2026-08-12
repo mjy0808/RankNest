@@ -1,0 +1,17 @@
+{
+  "feed": {
+    "country": "us",
+    "results": [
+      {
+        "artistName": "Tiny Studio",
+        "id": "1001",
+        "name": "Fresh Notes",
+        "releaseDate": "2026-08-01",
+        "kind": "apps",
+        "artworkUrl100": "https://example.com/icon.png",
+        "genres": [{"name": "Productivity"}],
+        "url": "https://apps.apple.com/us/app/id1001"
+      }
+    ]
+  }
+}
