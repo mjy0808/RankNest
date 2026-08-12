@@ -1,0 +1,55 @@
+name: Daily app and game radar
+
+on:
+  schedule:
+    - cron: "30 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-app-game-radar
+  cancel-in-progress: false
+
+jobs:
+  build-and-send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore radar history
+        uses: actions/cache@v4
+        with:
+          path: data/radar.db
+          key: radar-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            radar-db-${{ runner.os }}-
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Generate and send report
+        env:
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_SECURITY: ${{ secrets.SMTP_SECURITY }}
+        run: python -m app_radar --config config.json --send --require-email
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: potential-radar-${{ github.run_id }}
+          path: reports/
+          retention-days: 30
+          if-no-files-found: warn

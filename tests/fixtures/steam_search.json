@@ -1,0 +1,4 @@
+{
+  "success": 1,
+  "results_html": "<a href=\"https://store.steampowered.com/app/2002/Fresh_Game/?snr=test\" data-ds-appid=\"2002\" class=\"search_result_row\"><div class=\"search_capsule\"><img src=\"https://example.com/game.jpg\"></div><span class=\"title\">Fresh Game</span><div class=\"search_released responsive_secondrow\">Aug 1, 2026</div><span class=\"search_review_summary positive\" data-tooltip-html=\"Very Positive&lt;br&gt;92% of the 1,234 user reviews for this game are positive.\"></span><div class=\"discount_final_price\">$9.99</div></a>"
+}
