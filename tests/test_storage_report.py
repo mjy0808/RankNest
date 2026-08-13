@@ -65,6 +65,8 @@ class StorageAndReportTests(unittest.TestCase):
             self.assertEqual(payload["data_fingerprint"], "abc123")
             self.assertEqual(payload["sections"]["app"][0]["external_id"], "42")
             self.assertEqual(payload["sections"]["app"][0]["selected_streak"], 2)
+            self.assertIn("opportunity_fit", payload["sections"]["app"][0])
+            self.assertIn("build_angle", payload["sections"]["app"][0])
 
 
 if __name__ == "__main__":

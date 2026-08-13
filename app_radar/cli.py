@@ -11,7 +11,7 @@ from .pipeline import run_pipeline
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="app-radar",
-        description="生成全球潜力 App / 游戏 Top 20 日报",
+        description="生成全球高增长、可借鉴 App / 游戏 Top 20 机会日报",
     )
     parser.add_argument("--config", type=Path, default=Path("config.json"))
     parser.add_argument("--db", type=Path, default=Path("data/radar.db"))

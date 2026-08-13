@@ -137,8 +137,12 @@ def enrich_with_lookup(
         candidate.metadata.update(
             {
                 "genre": genre,
+                "genres": [str(value) for value in item.get("genres", [])]
+                if isinstance(item.get("genres"), list)
+                else candidate.metadata.get("genres", []),
                 "version": str(item.get("version", "")),
                 "currency": str(item.get("currency", "")),
+                "file_size_bytes": str(item.get("fileSizeBytes", "")),
             }
         )
 

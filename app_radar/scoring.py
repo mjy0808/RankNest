@@ -21,12 +21,35 @@ SEGMENT_LABELS = {
 }
 
 SEGMENT_WEIGHTS: dict[str, dict[str, float]] = {
-    "app": {"排名动量": 35, "口碑动量": 25, "讨论热度": 15, "市场广度": 15, "产品新鲜度": 10},
-    "mobile_game": {"排名动量": 40, "口碑动量": 25, "讨论热度": 5, "市场广度": 20, "产品新鲜度": 10},
-    "steam_game": {"排名动量": 40, "口碑动量": 25, "讨论热度": 5, "市场广度": 15, "产品新鲜度": 15},
+    "app": {
+        "排名动量": 30,
+        "口碑动量": 20,
+        "讨论热度": 5,
+        "市场广度": 10,
+        "产品新鲜度": 10,
+        "可借鉴性": 25,
+    },
+    "mobile_game": {
+        "排名动量": 35,
+        "口碑动量": 20,
+        "讨论热度": 0,
+        "市场广度": 10,
+        "产品新鲜度": 10,
+        "可借鉴性": 25,
+    },
+    "steam_game": {
+        "排名动量": 35,
+        "口碑动量": 20,
+        "讨论热度": 0,
+        "市场广度": 10,
+        "产品新鲜度": 15,
+        "可借鉴性": 20,
+    },
 }
 
 HORIZON_WEIGHTS = {1: 0.50, 3: 0.30, 7: 0.20}
+MIN_OPPORTUNITY_FIT = 60
+EXCLUDED_OPPORTUNITY_TAGS = {"成熟头部产品", "平台或网络效应较强", "存在品牌/IP 风险"}
 
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -55,6 +78,152 @@ def _freshness(candidate: Candidate, today: date) -> tuple[float, int | None]:
     if age_days <= 0:
         return 1.0, age_days
     return math.exp(-age_days / 240), age_days
+
+
+APP_GENRE_FEASIBILITY = {
+    "utilities": 0.92,
+    "productivity": 0.90,
+    "photo & video": 0.82,
+    "graphics & design": 0.82,
+    "business": 0.82,
+    "weather": 0.82,
+    "reference": 0.80,
+    "education": 0.78,
+    "lifestyle": 0.76,
+    "food & drink": 0.75,
+    "travel": 0.70,
+    "health & fitness": 0.66,
+    "navigation": 0.62,
+    "music": 0.58,
+    "finance": 0.52,
+    "news": 0.48,
+    "entertainment": 0.42,
+    "shopping": 0.35,
+    "social networking": 0.18,
+}
+SIMPLE_GAME_TERMS = {
+    "puzzle", "idle", "merge", "sort", "color", "colour", "block", "word",
+    "clicker", "tycoon", "simulator", "simulation", "casual", "quiz", "trivia",
+    "card", "board", "traffic", "chill", "repair", "deckbuilder", "roguelike",
+}
+COMPLEX_GAME_TERMS = {
+    "mmo", "mmorpg", "open world", "multiplayer", "battle royale", "commander",
+    "awakening", "warfare", "4x", "real-time strategy",
+}
+SIMPLE_GAME_GENRES = {"puzzle", "casual", "word", "board", "card", "trivia", "family"}
+COMPLEX_GAME_GENRES = {"role playing", "strategy", "action", "adventure", "racing"}
+
+
+def _genres(candidate: Candidate) -> set[str]:
+    values: list[object] = []
+    raw_genres = candidate.metadata.get("genres", [])
+    if isinstance(raw_genres, list):
+        values.extend(raw_genres)
+    if candidate.metadata.get("genre"):
+        values.append(candidate.metadata["genre"])
+    return {str(value).strip().casefold() for value in values if str(value).strip()}
+
+
+def _validation_window(candidate: Candidate) -> float:
+    reviews = candidate.review_count
+    if reviews <= 0:
+        return 0.25
+    log_reviews = math.log10(reviews + 1)
+    if candidate.segment == "app":
+        center, radius = 3.1, 3.2
+    elif candidate.segment == "mobile_game":
+        center, radius = 3.5, 3.4
+    else:
+        center, radius = 3.0, 3.0
+    return _clamp(1 - abs(log_reviews - center) / radius, 0.03, 1.0)
+
+
+def _implementation_feasibility(candidate: Candidate) -> tuple[float, list[str]]:
+    genres = _genres(candidate)
+    name = candidate.name.casefold()
+    tags: list[str] = []
+    if candidate.segment == "app":
+        primary = str(candidate.metadata.get("genre", "")).casefold()
+        feasibility = APP_GENRE_FEASIBILITY.get(primary, 0.60)
+        if feasibility >= 0.78:
+            tags.append("功能边界清晰")
+        elif feasibility <= 0.35:
+            tags.append("平台或网络效应较强")
+    else:
+        feasibility = 0.58 if candidate.segment == "mobile_game" else 0.50
+        if any(term in name for term in SIMPLE_GAME_TERMS) or genres.intersection(
+            SIMPLE_GAME_GENRES
+        ):
+            feasibility += 0.25
+            tags.append("核心玩法易拆解")
+        if any(term in name for term in COMPLEX_GAME_TERMS) or genres.intersection(
+            COMPLEX_GAME_GENRES
+        ):
+            feasibility -= 0.20
+            tags.append("内容或系统量较大")
+        if "™" in candidate.name or "®" in candidate.name:
+            feasibility -= 0.30
+            tags.append("存在品牌/IP 风险")
+
+    file_size = candidate.metadata.get("file_size_bytes")
+    try:
+        file_size_bytes = int(file_size) if file_size else 0
+    except (TypeError, ValueError):
+        file_size_bytes = 0
+    if file_size_bytes and file_size_bytes <= 250_000_000:
+        feasibility += 0.08
+        tags.append("产品体量较轻")
+    elif file_size_bytes >= 1_500_000_000:
+        feasibility -= 0.12
+        tags.append("资源体量较重")
+    return _clamp(feasibility), tags
+
+
+def _build_angle(candidate: Candidate) -> str:
+    primary = str(candidate.metadata.get("genre", "")).casefold()
+    name = candidate.name.casefold()
+    if candidate.segment == "app":
+        if primary in {"utilities", "weather", "navigation"}:
+            return "聚焦一个高频工具任务，用更少步骤和更清晰反馈切入"
+        if primary in {"productivity", "business"}:
+            return "选择垂直职业或流程，用模板、自动化和协作细节差异化"
+        if primary in {"photo & video", "graphics & design"}:
+            return "围绕一种风格或拍摄场景，重做模板、批处理与分享体验"
+        if primary in {"education", "reference"}:
+            return "选择细分学习主题，用练习、测验和进度反馈形成闭环"
+        return "缩小到单一高频场景，面向明确人群重新设计完整体验"
+    if any(term in name for term in {"puzzle", "sort", "block", "word", "quiz"}):
+        return "提炼短回合规则，重做主题、关卡曲线、反馈与商业化"
+    if any(term in name for term in {"idle", "clicker", "tycoon"}):
+        return "围绕单一成长循环换题材，并缩短首局正反馈时间"
+    if any(term in name for term in {"simulator", "simulation", "repair"}):
+        return "选择更窄的职业或物件场景，突出操作反馈和可扩展内容"
+    if any(term in name for term in {"card", "deck", "rogue"}):
+        return "保留可重复构筑循环，用新规则组合、题材和美术差异化"
+    return "先验证 5–10 分钟核心循环，再从题材、关卡和变现方式差异化"
+
+
+def _opportunity_fit(candidate: Candidate, today: date) -> tuple[float, list[str]]:
+    feasibility, tags = _implementation_feasibility(candidate)
+    validation = _validation_window(candidate)
+    fit = 0.65 * feasibility + 0.35 * validation
+
+    age_days = (today - candidate.release_date).days if candidate.release_date else None
+    if age_days is not None and age_days > 1_095 and candidate.review_count > 250_000:
+        fit *= 0.12
+        tags.append("成熟头部产品")
+    elif candidate.review_count >= 500_000:
+        fit *= 0.40
+        tags.append("竞争门槛较高")
+    elif 50 <= candidate.review_count <= 50_000:
+        tags.append("需求已有初步验证")
+
+    if fit >= 0.72:
+        tags.insert(0, "小团队可切入")
+    candidate.metadata["opportunity_fit"] = round(_clamp(fit) * 100)
+    candidate.metadata["opportunity_tags"] = list(dict.fromkeys(tags))[:3]
+    candidate.metadata["build_angle"] = _build_angle(candidate)
+    return _clamp(fit), candidate.metadata["opportunity_tags"]
 
 
 def _status_markets(statuses: list[SourceStatus], healthy_only: bool = True) -> set[tuple[str, str]]:
@@ -207,6 +376,11 @@ def _raw_score(
         reasons.append(
             f"{best_review_change[1]} 日新增 {best_review_change[0]:,} 条可比评价"
         )
+    opportunity, opportunity_tags = _opportunity_fit(candidate, today)
+    if opportunity_tags:
+        reasons.append(
+            f"可借鉴度 {round(opportunity * 100)}：{'、'.join(opportunity_tags[:2])}"
+        )
     if not history:
         reasons.append("建立首日监控基线")
     elif all(snapshot.observations.get(candidate.key) is None for snapshot in history.values()):
@@ -245,6 +419,7 @@ def _raw_score(
             "讨论热度": discussion,
             "市场广度": _clamp(breadth),
             "产品新鲜度": _clamp(fresh),
+            "可借鉴性": opportunity,
         },
         reasons=reasons,
         previous=previous,
@@ -278,7 +453,7 @@ def _effective_weights(group: list[_RawScore], segment: str) -> dict[str, float]
     discussion_reliability = _clamp(discussion_coverage / 0.10)
     base["讨论热度"] *= discussion_reliability
     missing_weight = 100 - sum(base.values())
-    recipients = [label for label in base if label != "讨论热度"]
+    recipients = [label for label in base if label != "讨论热度" and base[label] > 0]
     recipient_total = sum(base[label] for label in recipients)
     for label in recipients:
         base[label] += missing_weight * base[label] / recipient_total
@@ -328,7 +503,15 @@ def score_all(
 def select_segment_items(
     scored: list[ScoredCandidate], segment_counts: dict[str, int]
 ) -> dict[str, list[ScoredCandidate]]:
+    def actionable(item: ScoredCandidate) -> bool:
+        fit = int(item.candidate.metadata.get("opportunity_fit", 0))
+        tags = set(item.candidate.metadata.get("opportunity_tags", []))
+        return fit >= MIN_OPPORTUNITY_FIT and not tags.intersection(EXCLUDED_OPPORTUNITY_TAGS)
+
     return {
-        segment: [item for item in scored if item.candidate.segment == segment][:count]
+        segment: [
+            item for item in scored
+            if item.candidate.segment == segment and actionable(item)
+        ][:count]
         for segment, count in segment_counts.items()
     }
