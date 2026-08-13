@@ -34,13 +34,12 @@ class StorageAndReportTests(unittest.TestCase):
             root = Path(directory)
             database = root / "radar.db"
             with RadarStore(database) as store:
-                run_id, replaced, sent = store.save_run(
+                run_id, replaced = store.save_run(
                     captured, date(2026, 8, 11), "Asia/Shanghai", "abc123",
                     root / "reports/2026-08-11.html", statuses, scored,
                 )
                 self.assertFalse(replaced)
-                self.assertFalse(sent)
-                same_run_id, replaced, _ = store.save_run(
+                same_run_id, replaced = store.save_run(
                     captured, date(2026, 8, 11), "Asia/Shanghai", "abc123",
                     root / "reports/2026-08-11.html", statuses, scored,
                 )

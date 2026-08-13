@@ -28,7 +28,6 @@ class PipelineResult:
     fingerprint: str
     history_days: tuple[int, ...]
     replaced_existing_run: bool
-    already_sent: bool
 
 
 def _merge(target: dict[tuple[str, str], Candidate], candidates: list[Candidate]) -> None:
@@ -92,7 +91,7 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
         history = store.load_history(local_now.date(), config.report.timezone)
         scored = score_all(candidates, history, statuses, local_now.date())
         sections = select_segment_items(scored, config.report.segment_counts)
-        run_id, replaced, already_sent = store.save_run(
+        run_id, replaced = store.save_run(
             captured_at=captured_at,
             run_day=local_now.date(),
             timezone_name=config.report.timezone,
@@ -125,10 +124,4 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
         fingerprint=fingerprint,
         history_days=tuple(sorted(history)),
         replaced_existing_run=replaced,
-        already_sent=already_sent,
     )
-
-
-def mark_run_sent(database_path: Path, run_id: int) -> None:
-    with RadarStore(database_path) as store:
-        store.mark_sent(run_id)

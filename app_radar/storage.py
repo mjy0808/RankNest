@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS runs (
     run_day TEXT,
     timezone TEXT,
     data_fingerprint TEXT,
-    sent_at TEXT,
     report_path TEXT
 );
 
@@ -61,7 +60,6 @@ RUN_COLUMNS = {
     "run_day": "TEXT",
     "timezone": "TEXT",
     "data_fingerprint": "TEXT",
-    "sent_at": "TEXT",
     "report_path": "TEXT",
 }
 
@@ -239,18 +237,17 @@ class RadarStore:
         report_path: Path,
         statuses: list[SourceStatus],
         scored: list[ScoredCandidate],
-    ) -> tuple[int, bool, bool]:
+    ) -> tuple[int, bool]:
         status_json = json.dumps(
             [status.as_dict() for status in statuses], ensure_ascii=False, separators=(",", ":")
         )
         existing = self.connection.execute(
-            "SELECT id, sent_at FROM runs WHERE run_day = ? AND timezone = ?",
+            "SELECT id FROM runs WHERE run_day = ? AND timezone = ?",
             (run_day.isoformat(), timezone_name),
         ).fetchone()
         with self.connection:
             if existing:
                 run_id = int(existing[0])
-                already_sent = bool(existing[1])
                 self.connection.execute("DELETE FROM observations WHERE run_id = ?", (run_id,))
                 self.connection.execute(
                     """
@@ -277,7 +274,6 @@ class RadarStore:
                     ),
                 )
                 run_id = int(cursor.lastrowid)
-                already_sent = False
 
             rows = []
             for item in scored:
@@ -310,12 +306,7 @@ class RadarStore:
                 """,
                 rows,
             )
-        return run_id, bool(existing), already_sent
-
-    def mark_sent(self, run_id: int, sent_at: datetime | None = None) -> None:
-        value = (sent_at or datetime.now(timezone.utc)).isoformat()
-        with self.connection:
-            self.connection.execute("UPDATE runs SET sent_at = ? WHERE id = ?", (value, run_id))
+        return run_id, bool(existing)
 
     def prune_history(self, current_day: date, timezone_name: str, retention_days: int) -> int:
         cutoff = (current_day - timedelta(days=retention_days)).isoformat()

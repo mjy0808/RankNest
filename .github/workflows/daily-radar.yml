@@ -7,13 +7,15 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: daily-app-game-radar
   cancel-in-progress: false
 
 jobs:
-  build-and-send:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -34,16 +36,19 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
-      - name: Generate and send report
-        env:
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SMTP_SECURITY: ${{ secrets.SMTP_SECURITY }}
-        run: python -m app_radar --config config.json --send --require-email
+      - name: Generate report
+        run: python -m app_radar --config config.json
+
+      - name: Prepare Pages site
+        run: cp reports/latest.html reports/index.html
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: reports/
 
       - name: Upload report artifact
         if: always()
@@ -53,3 +58,35 @@ jobs:
           path: reports/
           retention-days: 30
           if-no-files-found: warn
+
+  deploy-and-notify:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: potential-radar-${{ github.run_id }}
+          path: reports/
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Notify Lark
+        env:
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+        run: python -m app_radar.lark --report reports/latest.json --url "${{ steps.deployment.outputs.page_url }}"
