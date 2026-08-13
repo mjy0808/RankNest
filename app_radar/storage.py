@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS observations (
     review_counts_json TEXT NOT NULL DEFAULT '{}',
     ratings_json TEXT NOT NULL DEFAULT '{}',
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    selected_rank INTEGER,
     PRIMARY KEY (run_id, source, external_id)
 );
 
@@ -68,6 +69,7 @@ OBSERVATION_COLUMNS = {
     "review_counts_json": "TEXT NOT NULL DEFAULT '{}'",
     "ratings_json": "TEXT NOT NULL DEFAULT '{}'",
     "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+    "selected_rank": "INTEGER",
 }
 
 
@@ -159,12 +161,16 @@ class RadarStore:
         rows = self.connection.execute(
             """
             SELECT source, external_id, average_rank, best_rank, review_count,
-                   market_count, social_mentions, ranks_json, review_counts_json
+                   market_count, social_mentions, ranks_json, review_counts_json,
+                   selected_rank
             FROM observations WHERE run_id = ?
             """,
             (run_id,),
         )
-        for source, external_id, avg_rank, best_rank, reviews, markets, mentions, ranks, counts in rows:
+        for (
+            source, external_id, avg_rank, best_rank, reviews, markets, mentions,
+            ranks, counts, selected_rank,
+        ) in rows:
             try:
                 rank_values = {str(k): int(v) for k, v in json.loads(ranks or "{}").items()}
             except (TypeError, ValueError, json.JSONDecodeError):
@@ -181,6 +187,7 @@ class RadarStore:
                 review_count=int(reviews),
                 market_count=int(markets),
                 social_mentions=int(mentions),
+                selected_rank=int(selected_rank) if selected_rank is not None else None,
                 ranks=rank_values,
                 review_counts=review_values,
             )
@@ -228,6 +235,61 @@ class RadarStore:
             )
         return snapshots
 
+    def load_previous_source_counts(
+        self, current_day: date, timezone_name: str
+    ) -> dict[str, int]:
+        row = self.connection.execute(
+            """
+            SELECT source_status_json FROM runs
+            WHERE timezone = ? AND run_day < ?
+            ORDER BY run_day DESC, id DESC LIMIT 1
+            """,
+            (timezone_name, current_day.isoformat()),
+        ).fetchone()
+        if row is None:
+            return {}
+        try:
+            payload = json.loads(row[0])
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return {
+            str(status.get("name")): int(status.get("item_count", 0))
+            for status in payload
+            if isinstance(status, dict)
+            and status.get("state", "healthy" if status.get("ok") else "failed") == "healthy"
+        }
+
+    def load_selected_streaks(
+        self,
+        current_day: date,
+        timezone_name: str,
+        selected_keys: set[tuple[str, str]],
+    ) -> dict[tuple[str, str], int]:
+        if not selected_keys:
+            return {}
+        days_by_key: dict[tuple[str, str], set[date]] = {key: set() for key in selected_keys}
+        rows = self.connection.execute(
+            """
+            SELECT r.run_day, o.source, o.external_id
+            FROM runs r JOIN observations o ON o.run_id = r.id
+            WHERE r.timezone = ? AND r.run_day < ? AND o.selected_rank IS NOT NULL
+            ORDER BY r.run_day DESC
+            """,
+            (timezone_name, current_day.isoformat()),
+        )
+        for run_day_text, source, external_id in rows:
+            key = (str(source), str(external_id))
+            if key in days_by_key:
+                days_by_key[key].add(date.fromisoformat(run_day_text))
+
+        streaks: dict[tuple[str, str], int] = {}
+        for key, days in days_by_key.items():
+            streak = 1
+            while current_day - timedelta(days=streak) in days:
+                streak += 1
+            streaks[key] = streak
+        return streaks
+
     def save_run(
         self,
         captured_at: datetime,
@@ -237,6 +299,7 @@ class RadarStore:
         report_path: Path,
         statuses: list[SourceStatus],
         scored: list[ScoredCandidate],
+        selected_ranks: dict[tuple[str, str], int] | None = None,
     ) -> tuple[int, bool]:
         status_json = json.dumps(
             [status.as_dict() for status in statuses], ensure_ascii=False, separators=(",", ":")
@@ -293,6 +356,7 @@ class RadarStore:
                         json.dumps(candidate.review_counts, ensure_ascii=False, separators=(",", ":")),
                         json.dumps(candidate.ratings, ensure_ascii=False, separators=(",", ":")),
                         json.dumps(candidate.metadata, ensure_ascii=False, separators=(",", ":")),
+                        (selected_ranks or {}).get(candidate.key),
                     )
                 )
             self.connection.executemany(
@@ -301,8 +365,8 @@ class RadarStore:
                     run_id, source, external_id, name, kind, developer, url, image_url,
                     release_date, update_date, rating, review_count, market_count,
                     best_rank, average_rank, social_mentions, score, ranks_json, components_json,
-                    segment, review_counts_json, ratings_json, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    segment, review_counts_json, ratings_json, metadata_json, selected_rank
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )

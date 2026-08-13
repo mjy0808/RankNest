@@ -12,6 +12,7 @@ from .collectors.social import apply_hacker_news_mentions
 from .collectors.steam import collect_steam
 from .config import Config
 from .http import HttpClient
+from .health import assess_source_health
 from .models import Candidate, SourceStatus
 from .report import ReportArtifacts, write_report
 from .scoring import score_all, select_segment_items
@@ -85,12 +86,29 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
         )
         raise RuntimeError(f"all collectors returned no candidates. {details}")
 
-    fingerprint = _fingerprint(candidates, statuses)
-    report_path = output_dir / f"{local_now:%Y-%m-%d}.html"
+    report_path = output_dir / "archive" / f"{local_now:%Y-%m-%d}.html"
     with RadarStore(database_path) as store:
+        previous_counts = store.load_previous_source_counts(
+            local_now.date(), config.report.timezone
+        )
+        statuses = assess_source_health(statuses, previous_counts, config.health)
+        fingerprint = _fingerprint(candidates, statuses)
         history = store.load_history(local_now.date(), config.report.timezone)
         scored = score_all(candidates, history, statuses, local_now.date())
         sections = select_segment_items(scored, config.report.segment_counts)
+        selected_ranks = {
+            item.candidate.key: rank
+            for items in sections.values()
+            for rank, item in enumerate(items, start=1)
+        }
+        streaks = store.load_selected_streaks(
+            local_now.date(), config.report.timezone, set(selected_ranks)
+        )
+        for items in sections.values():
+            for item in items:
+                item.candidate.metadata["selected_streak"] = streaks.get(
+                    item.candidate.key, 1
+                )
         run_id, replaced = store.save_run(
             captured_at=captured_at,
             run_day=local_now.date(),
@@ -99,6 +117,7 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
             report_path=report_path,
             statuses=statuses,
             scored=scored,
+            selected_ranks=selected_ranks,
         )
         store.prune_history(
             local_now.date(), config.report.timezone, config.storage.retention_days
@@ -114,6 +133,7 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
         history_days=sorted(history),
         run_id=run_id,
         fingerprint=fingerprint,
+        retention_days=config.storage.retention_days,
     )
     return PipelineResult(
         artifacts=artifacts,
