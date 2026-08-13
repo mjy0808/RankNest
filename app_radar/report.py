@@ -68,6 +68,9 @@ def _item_dict(rank: int, item: ScoredCandidate) -> dict[str, Any]:
         "previous_selected_rank": item.previous.selected_rank if item.previous else None,
         "rank_change": _rank_change(rank, item),
         "selected_streak": int(candidate.metadata.get("selected_streak", 1)),
+        "opportunity_fit": int(candidate.metadata.get("opportunity_fit", 0)),
+        "opportunity_tags": list(candidate.metadata.get("opportunity_tags", [])),
+        "build_angle": str(candidate.metadata.get("build_angle", "")),
     }
 
 
@@ -123,6 +126,18 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
         trend_badge = '<span class="trend flat">— 持平</span>'
     streak = int(candidate.metadata.get("selected_streak", 1))
     streak_badge = f'<span class="streak">连续 {streak} 天</span>' if streak > 1 else ""
+    opportunity_fit = int(candidate.metadata.get("opportunity_fit", 0))
+    opportunity_tags = [
+        html.escape(str(value))
+        for value in candidate.metadata.get("opportunity_tags", [])
+    ]
+    opportunity_html = (
+        f'<div class="opportunity"><strong>可借鉴度 {opportunity_fit}</strong>'
+        + "".join(f"<span>{value}</span>" for value in opportunity_tags)
+        + "</div>"
+    )
+    build_angle = html.escape(str(candidate.metadata.get("build_angle", "")))
+    angle_html = f'<div class="angle"><strong>差异化切入：</strong>{build_angle}</div>'
     title_html = f'<a href="{url}">{name}</a>' if url else name
     return f"""
     <article class="card">
@@ -137,6 +152,8 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
         <div class="developer">{developer}</div>
         <div class="metrics">{metrics}</div>
         <div class="markets">{html.escape(markets)}</div>
+        {opportunity_html}
+        {angle_html}
         <ul>{reasons}</ul>
         <div class="components">{component_rows}</div>
       </div>
@@ -206,14 +223,14 @@ def render_html(
   .nav{{display:flex;gap:10px;margin-top:18px}} .nav a{{color:#d8fff3;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;text-decoration:none;font-size:12px;font-weight:700}}
   .rank{{font-weight:900;font-size:18px;color:#9ba9af;padding-top:4px}} .icon{{position:relative;border-radius:16px;width:72px;height:72px;background:linear-gradient(145deg,#e5f2ee,#dce5ea);display:flex;align-items:center;justify-content:center;color:#2e7462;font-size:24px;font-weight:900;overflow:hidden}} .icon img{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#eef3f3}}
   .headline{{display:flex;justify-content:space-between;align-items:center;gap:12px}} .pill{{display:inline-block;background:#dff7ef;color:#11644e;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800}} .source{{margin-left:7px;color:#7b8b91;font-size:12px}} .trend,.streak{{display:inline-block;margin-left:6px;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}} .trend.new{{background:#fff0c2;color:#765500}} .trend.up{{background:#dcf7e7;color:#17643a}} .trend.down{{background:#ffe2e2;color:#9b3333}} .trend.flat,.streak{{background:#edf1f2;color:#637279}}
-  .score{{color:#0a7a5c;font-size:23px;font-weight:900}} .score small{{font-size:11px;color:#95a2a7}} h3{{font-size:19px;margin:3px 0 0}} h3 a{{color:#16202a;text-decoration:none}} .developer,.markets{{font-size:12px;color:#809097}} .metrics{{font-size:13px;margin-top:10px;color:#4a5a61}} .markets{{margin-top:2px}}
+  .score{{color:#0a7a5c;font-size:23px;font-weight:900}} .score small{{font-size:11px;color:#95a2a7}} h3{{font-size:19px;margin:3px 0 0}} h3 a{{color:#16202a;text-decoration:none}} .developer,.markets{{font-size:12px;color:#809097}} .metrics{{font-size:13px;margin-top:10px;color:#4a5a61}} .markets{{margin-top:2px}} .opportunity{{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:9px}} .opportunity strong{{color:#0a7a5c;font-size:12px}} .opportunity span{{background:#eef8f5;color:#326759;border-radius:999px;padding:2px 7px;font-size:10px}} .angle{{margin-top:8px;background:#f6f9fa;border-left:3px solid #42b998;border-radius:4px;padding:7px 9px;color:#4a5a61;font-size:11px}}
   ul{{margin:10px 0 4px;padding-left:20px;color:#35464d;font-size:13px}} .components{{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:7px;margin-top:12px}} .component{{font-size:10px;color:#728187}} .component>span:nth-child(2){{float:right;font-weight:700}} .bar{{height:4px;background:#edf1f2;border-radius:9px;clear:both;margin-top:4px;overflow:hidden}} .bar i{{display:block;height:100%;background:#42b998;border-radius:9px}}
   details{{background:#fff;border:1px solid #e3e8eb;border-radius:14px;padding:12px 16px;margin-top:16px}} footer{{color:#7a8a90;font-size:12px;padding:18px 4px}} footer strong{{color:#40545b}}
   @media(max-width:640px){{.summary{{grid-template-columns:repeat(2,1fr)}} .card{{grid-template-columns:28px 58px 1fr;padding:14px;gap:9px}} .icon{{width:54px;height:54px;border-radius:12px}} .components{{grid-template-columns:repeat(2,1fr)}} .metrics{{line-height:1.8}}}}
 </style></head><body><main class="wrap">
   <header class="hero">
     <div class="eyebrow">Daily Potential Radar</div><h1>{html.escape(title)}</h1>
-    <p class="sub">App、手游和 Steam 游戏分榜比较；增长指标仅使用健康市场的同口径配对数据。</p>
+    <p class="sub">优先发现需求已验证、增长快、实现边界清晰且适合小团队差异化切入的产品机会。</p>
     <div class="trace">{html.escape(trace)} · {generated_label}</div>
     <div class="summary">
       <div><strong>{total_candidates:,}</strong><span>监控候选</span></div>
@@ -227,7 +244,7 @@ def render_html(
   {history_notice}{section_html}{issues_html}
   <footer>
     <p><strong>筛选范围：</strong>从 {total_candidates:,} 个跨市场候选中按分榜选出 {total_selected} 个。</p>
-    <p><strong>方法：</strong>使用 1/3/7 日配对榜位、同市场评价增速、外部讨论、健康市场覆盖和新鲜度；各分榜内部做百分位标准化。公开信号不代表精确下载量或收入。</p>
+    <p><strong>方法：</strong>综合 1/3/7 日榜位与评价增速、市场扩散、新鲜度和可借鉴性；对成熟头部、强网络效应、重内容与明显 IP 风险产品降权。只借鉴需求、机制和商业模式，不复制名称、美术、代码或受保护内容。</p>
   </footer>
 </main></body></html>"""
 
@@ -297,7 +314,7 @@ def write_report(
         for segment, items in sections.items()
     }
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "run_id": run_id,
         "data_fingerprint": fingerprint,
         "title": title,

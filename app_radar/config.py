@@ -8,7 +8,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ReportConfig:
-    title: str = "全球潜力 App / 游戏日报"
+    title: str = "全球高增长产品机会日报"
     app_count: int = 8
     mobile_game_count: int = 6
     steam_game_count: int = 6

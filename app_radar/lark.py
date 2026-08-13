@@ -29,9 +29,10 @@ def _top_lines(payload: dict[str, Any], count: int = 3) -> list[str]:
         for item in items[:count]:
             reasons = item.get("reasons") or []
             reason = f" · {reasons[0]}" if reasons else ""
+            opportunity = int(item.get("opportunity_fit", 0))
             lines.append(
                 f"{item.get('rank', '-')}. {item.get('name', '未知')} "
-                f"— {float(item.get('score', 0)):.1f} 分{reason}"
+                f"— {float(item.get('score', 0)):.1f} 分 · 可借鉴 {opportunity}{reason}"
             )
         lines.append("")
     return lines
@@ -55,7 +56,7 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
             "header": {
                 "title": {
                     "tag": "plain_text",
-                    "content": f"全球潜力 App / 游戏日报 · {generated_at}",
+                    "content": f"全球高增长产品机会日报 · {generated_at}",
                 },
                 "template": "turquoise",
             },
