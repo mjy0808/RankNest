@@ -32,5 +32,10 @@
   },
   "storage": {
     "retention_days": 45
+  },
+  "health": {
+    "previous_count_ratio": 0.65,
+    "apple_min_items": 180,
+    "steam_min_items": 70
   }
 }

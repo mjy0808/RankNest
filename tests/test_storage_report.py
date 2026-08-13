@@ -49,17 +49,22 @@ class StorageAndReportTests(unittest.TestCase):
                 self.assertEqual(count, 1)
 
             sections = select_segment_items(scored, {"app": 1, "mobile_game": 1, "steam_game": 1})
+            candidate.metadata["selected_streak"] = 2
             artifacts = write_report(
                 root / "reports", "测试日报", captured, sections, statuses, 1,
                 [], run_id, "abc123",
             )
             self.assertTrue(artifacts.latest_html.exists())
             self.assertIn("Small Wonder", artifacts.html_body)
-            self.assertNotIn("<img", artifacts.html_body)
+            self.assertIn("连续 2 天", artifacts.html_body)
+            self.assertIn("首次上榜", artifacts.html_body)
+            self.assertTrue((root / "reports/archive/index.html").exists())
+            self.assertEqual(artifacts.dated_html.parent.name, "archive")
             payload = json.loads(artifacts.latest_json.read_text(encoding="utf-8"))
             self.assertEqual(payload["run_id"], run_id)
             self.assertEqual(payload["data_fingerprint"], "abc123")
             self.assertEqual(payload["sections"]["app"][0]["external_id"], "42")
+            self.assertEqual(payload["sections"]["app"][0]["selected_streak"], 2)
 
 
 if __name__ == "__main__":

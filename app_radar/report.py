@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,12 @@ def _source_label(source: str) -> str:
     return {"apple": "App Store", "steam": "Steam"}.get(source, source.title())
 
 
+def _rank_change(rank: int, item: ScoredCandidate) -> int | None:
+    if item.previous is None or item.previous.selected_rank is None:
+        return None
+    return item.previous.selected_rank - rank
+
+
 def _item_dict(rank: int, item: ScoredCandidate) -> dict[str, Any]:
     candidate = item.candidate
     return {
@@ -59,6 +65,9 @@ def _item_dict(rank: int, item: ScoredCandidate) -> dict[str, Any]:
         "component_weights": item.component_weights,
         "reasons": list(item.reasons),
         "markets": sorted({key.split(":", 1)[0].upper() for key in candidate.ranks}),
+        "previous_selected_rank": item.previous.selected_rank if item.previous else None,
+        "rank_change": _rank_change(rank, item),
+        "selected_streak": int(candidate.metadata.get("selected_streak", 1)),
     }
 
 
@@ -96,7 +105,24 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
         if item.component_weights[label] > 0
     )
     initial = html.escape(candidate.name[:1].upper() if candidate.name else segment_label[:1])
+    image_url = html.escape(candidate.image_url, quote=True)
     image_html = f'<span>{initial}</span>'
+    if image_url:
+        image_html += (
+            f'<img src="{image_url}" alt="" loading="lazy" '
+            'referrerpolicy="no-referrer" onerror="this.remove()">'
+        )
+    change = _rank_change(index, item)
+    if item.previous is None or item.previous.selected_rank is None:
+        trend_badge = '<span class="trend new">首次上榜</span>'
+    elif change > 0:
+        trend_badge = f'<span class="trend up">↑ {change}</span>'
+    elif change < 0:
+        trend_badge = f'<span class="trend down">↓ {abs(change)}</span>'
+    else:
+        trend_badge = '<span class="trend flat">— 持平</span>'
+    streak = int(candidate.metadata.get("selected_streak", 1))
+    streak_badge = f'<span class="streak">连续 {streak} 天</span>' if streak > 1 else ""
     title_html = f'<a href="{url}">{name}</a>' if url else name
     return f"""
     <article class="card">
@@ -104,7 +130,7 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
       <div class="icon">{image_html}</div>
       <div class="main">
         <div class="headline">
-          <div><span class="pill">{segment_label}</span><span class="source">{source_label}</span></div>
+          <div><span class="pill">{segment_label}</span><span class="source">{source_label}</span>{trend_badge}{streak_badge}</div>
           <div class="score">{item.score:.1f}<small>/100</small></div>
         </div>
         <h3>{title_html}</h3>
@@ -127,6 +153,8 @@ def render_html(
     history_days: list[int],
     run_id: int,
     fingerprint: str,
+    history_href: str = "archive/",
+    latest_href: str | None = None,
 ) -> str:
     healthy, degraded, failed = _status_summary(statuses)
     total_selected = sum(len(items) for items in sections.values())
@@ -160,6 +188,9 @@ def render_html(
         issues_html = f'<details><summary>数据源异常或降级（{len(issues)}）</summary><ul>{rows}</ul></details>'
     generated_label = generated_at.strftime("%Y-%m-%d %H:%M %Z")
     trace = f"run #{run_id} · {fingerprint[:12]}"
+    navigation = f'<a href="{html.escape(history_href, quote=True)}">历史日报</a>'
+    if latest_href:
+        navigation += f'<a href="{html.escape(latest_href, quote=True)}">返回最新</a>'
     return f"""<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -172,8 +203,9 @@ def render_html(
   .health{{font-size:12px;color:#bfd0d4;margin-top:12px}} .health b{{color:#7ee0c3}} .notice{{margin:16px 0;background:#fff6d9;color:#6d5312;border:1px solid #f1d987;border-radius:14px;padding:13px 16px}}
   .ranking{{margin-top:30px}} .section-title{{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid #173a44;margin:0 2px 12px;padding:0 2px 8px}} .section-title span{{font-size:23px;font-weight:900}} .section-title small{{color:#6d8088}}
   .card{{position:relative;display:grid;grid-template-columns:34px 76px 1fr;gap:14px;margin:14px 0;background:#fff;border:1px solid #e3e8eb;border-radius:18px;padding:18px;box-shadow:0 8px 24px rgba(25,45,55,.05)}}
-  .rank{{font-weight:900;font-size:18px;color:#9ba9af;padding-top:4px}} .icon{{border-radius:16px;width:72px;height:72px;background:linear-gradient(145deg,#e5f2ee,#dce5ea);display:flex;align-items:center;justify-content:center;color:#2e7462;font-size:24px;font-weight:900;overflow:hidden}}
-  .headline{{display:flex;justify-content:space-between;align-items:center;gap:12px}} .pill{{display:inline-block;background:#dff7ef;color:#11644e;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800}} .source{{margin-left:7px;color:#7b8b91;font-size:12px}}
+  .nav{{display:flex;gap:10px;margin-top:18px}} .nav a{{color:#d8fff3;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;text-decoration:none;font-size:12px;font-weight:700}}
+  .rank{{font-weight:900;font-size:18px;color:#9ba9af;padding-top:4px}} .icon{{position:relative;border-radius:16px;width:72px;height:72px;background:linear-gradient(145deg,#e5f2ee,#dce5ea);display:flex;align-items:center;justify-content:center;color:#2e7462;font-size:24px;font-weight:900;overflow:hidden}} .icon img{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#eef3f3}}
+  .headline{{display:flex;justify-content:space-between;align-items:center;gap:12px}} .pill{{display:inline-block;background:#dff7ef;color:#11644e;border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800}} .source{{margin-left:7px;color:#7b8b91;font-size:12px}} .trend,.streak{{display:inline-block;margin-left:6px;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800}} .trend.new{{background:#fff0c2;color:#765500}} .trend.up{{background:#dcf7e7;color:#17643a}} .trend.down{{background:#ffe2e2;color:#9b3333}} .trend.flat,.streak{{background:#edf1f2;color:#637279}}
   .score{{color:#0a7a5c;font-size:23px;font-weight:900}} .score small{{font-size:11px;color:#95a2a7}} h3{{font-size:19px;margin:3px 0 0}} h3 a{{color:#16202a;text-decoration:none}} .developer,.markets{{font-size:12px;color:#809097}} .metrics{{font-size:13px;margin-top:10px;color:#4a5a61}} .markets{{margin-top:2px}}
   ul{{margin:10px 0 4px;padding-left:20px;color:#35464d;font-size:13px}} .components{{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:7px;margin-top:12px}} .component{{font-size:10px;color:#728187}} .component>span:nth-child(2){{float:right;font-weight:700}} .bar{{height:4px;background:#edf1f2;border-radius:9px;clear:both;margin-top:4px;overflow:hidden}} .bar i{{display:block;height:100%;background:#42b998;border-radius:9px}}
   details{{background:#fff;border:1px solid #e3e8eb;border-radius:14px;padding:12px 16px;margin-top:16px}} footer{{color:#7a8a90;font-size:12px;padding:18px 4px}} footer strong{{color:#40545b}}
@@ -184,12 +216,13 @@ def render_html(
     <p class="sub">App、手游和 Steam 游戏分榜比较；增长指标仅使用健康市场的同口径配对数据。</p>
     <div class="trace">{html.escape(trace)} · {generated_label}</div>
     <div class="summary">
-      <div><strong>{total_selected}</strong><span>今日总候选</span></div>
+      <div><strong>{total_candidates:,}</strong><span>监控候选</span></div>
       <div><strong>{len(sections.get('app', []))}</strong><span>App</span></div>
       <div><strong>{len(sections.get('mobile_game', []))}</strong><span>手游</span></div>
       <div><strong>{len(sections.get('steam_game', []))}</strong><span>Steam 游戏</span></div>
     </div>
     <div class="health"><b>{healthy}</b> 健康 · {degraded} 降级 · {failed} 失败</div>
+    <nav class="nav">{navigation}</nav>
   </header>
   {history_notice}{section_html}{issues_html}
   <footer>
@@ -243,11 +276,18 @@ def write_report(
     history_days: list[int],
     run_id: int,
     fingerprint: str,
+    retention_days: int = 45,
 ) -> ReportArtifacts:
     output_dir.mkdir(parents=True, exist_ok=True)
+    archive_dir = output_dir / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
     html_body = render_html(
         title, generated_at, sections, statuses, total_candidates,
         history_days, run_id, fingerprint,
+    )
+    archive_html_body = render_html(
+        title, generated_at, sections, statuses, total_candidates,
+        history_days, run_id, fingerprint, history_href="./", latest_href="../",
     )
     text_body = render_text(
         title, generated_at, sections, total_candidates, history_days, run_id, fingerprint
@@ -269,14 +309,15 @@ def write_report(
         "items": [item for values in serialized_sections.values() for item in values],
     }
 
-    dated_html = output_dir / f"{generated_at:%Y-%m-%d}.html"
+    dated_html = archive_dir / f"{generated_at:%Y-%m-%d}.html"
     latest_html = output_dir / "latest.html"
     latest_text = output_dir / "latest.txt"
     latest_json = output_dir / "latest.json"
-    dated_html.write_text(html_body, encoding="utf-8")
+    dated_html.write_text(archive_html_body, encoding="utf-8")
     latest_html.write_text(html_body, encoding="utf-8")
     latest_text.write_text(text_body, encoding="utf-8")
     latest_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_archive_index(archive_dir, title, generated_at, retention_days)
     return ReportArtifacts(
         dated_html=dated_html,
         latest_html=latest_html,
@@ -285,3 +326,31 @@ def write_report(
         html_body=html_body,
         text_body=text_body,
     )
+
+
+def _write_archive_index(
+    archive_dir: Path, title: str, generated_at: datetime, retention_days: int
+) -> None:
+    cutoff = generated_at.date() - timedelta(days=retention_days)
+    reports: list[tuple[date, Path]] = []
+    for path in archive_dir.glob("????-??-??.html"):
+        try:
+            report_day = date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if report_day < cutoff:
+            path.unlink()
+            continue
+        reports.append((report_day, path))
+    reports.sort(reverse=True)
+    links = "".join(
+        f'<li><a href="{html.escape(path.name, quote=True)}">{day:%Y-%m-%d}</a>'
+        f'<span>{"最新" if index == 0 else "日报快照"}</span></li>'
+        for index, (day, path) in enumerate(reports)
+    )
+    body = f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(title)} · 历史日报</title><style>
+body{{margin:0;background:#f3f5f7;color:#16202a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}}main{{max-width:720px;margin:0 auto;padding:32px 16px}}header{{background:#173a44;color:#fff;border-radius:20px;padding:26px}}h1{{margin:4px 0 8px}}header a{{color:#8ff0d3}}ul{{list-style:none;padding:0}}li{{display:flex;justify-content:space-between;background:#fff;border:1px solid #e3e8eb;border-radius:13px;margin:9px 0;padding:14px 16px}}li a{{color:#11644e;font-weight:800;text-decoration:none}}li span{{color:#809097;font-size:12px}}
+</style></head><body><main><header><small>REPORT ARCHIVE</small><h1>历史日报</h1><a href="../">返回最新报告</a></header><ul>{links}</ul></main></body></html>"""
+    (archive_dir / "index.html").write_text(body, encoding="utf-8")

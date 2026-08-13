@@ -33,6 +33,14 @@ jobs:
           restore-keys: |
             radar-db-${{ runner.os }}-
 
+      - name: Restore report archive
+        uses: actions/cache@v4
+        with:
+          path: reports/archive
+          key: report-archive-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            report-archive-${{ runner.os }}-
+
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
@@ -76,6 +84,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Restore notification state
+        uses: actions/cache@v4
+        with:
+          path: data/lark-state.json
+          key: lark-state-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            lark-state-${{ runner.os }}-
+
       - name: Download report artifact
         uses: actions/download-artifact@v4
         with:
@@ -90,3 +106,23 @@ jobs:
         env:
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
         run: python -m app_radar.lark --report reports/latest.json --url "${{ steps.deployment.outputs.page_url }}"
+
+  notify-failure:
+    runs-on: ubuntu-latest
+    needs: [build, deploy-and-notify]
+    if: ${{ always() && (needs.build.result == 'failure' || needs.deploy-and-notify.result == 'failure') }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Notify Lark about workflow failure
+        env:
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          FAILURE_DETAIL: build=${{ needs.build.result }}, deploy-and-notify=${{ needs.deploy-and-notify.result }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python -m app_radar.lark --failure --detail "$FAILURE_DETAIL" --url "$WORKFLOW_URL"

@@ -104,6 +104,7 @@ class PreviousObservation:
     review_count: int
     market_count: int
     social_mentions: int
+    selected_rank: int | None = None
     ranks: dict[str, int] = field(default_factory=dict)
     review_counts: dict[str, int] = field(default_factory=dict)
 

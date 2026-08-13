@@ -213,9 +213,11 @@ tempCodeRunnerFile.py
 .DS_Store
 data/*.db
 data/*.db-*
+data/lark-state.json
 reports/*.html
 reports/*.txt
 reports/*.json
+reports/archive/
 !reports/.gitkeep
 
 # Marimo

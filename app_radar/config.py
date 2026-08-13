@@ -67,6 +67,13 @@ class StorageConfig:
 
 
 @dataclass(frozen=True)
+class HealthConfig:
+    previous_count_ratio: float = 0.65
+    apple_min_items: int = 180
+    steam_min_items: int = 70
+
+
+@dataclass(frozen=True)
 class Config:
     report: ReportConfig = field(default_factory=ReportConfig)
     apple: AppleConfig = field(default_factory=AppleConfig)
@@ -74,6 +81,7 @@ class Config:
     social: SocialConfig = field(default_factory=SocialConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    health: HealthConfig = field(default_factory=HealthConfig)
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -96,6 +104,7 @@ def load_config(path: Path) -> Config:
     social = _section(data, "social")
     network = _section(data, "network")
     storage = _section(data, "storage")
+    health = _section(data, "health")
 
     config = Config(
         report=ReportConfig(
@@ -134,6 +143,13 @@ def load_config(path: Path) -> Config:
         storage=StorageConfig(
             retention_days=int(storage.get("retention_days", StorageConfig.retention_days)),
         ),
+        health=HealthConfig(
+            previous_count_ratio=float(
+                health.get("previous_count_ratio", HealthConfig.previous_count_ratio)
+            ),
+            apple_min_items=int(health.get("apple_min_items", HealthConfig.apple_min_items)),
+            steam_min_items=int(health.get("steam_min_items", HealthConfig.steam_min_items)),
+        ),
     )
     _validate(config)
     return config
@@ -150,3 +166,7 @@ def _validate(config: Config) -> None:
         raise ValueError("invalid network timeout or retry count")
     if config.storage.retention_days < 8:
         raise ValueError("storage.retention_days must be at least 8")
+    if not 0 < config.health.previous_count_ratio <= 1:
+        raise ValueError("health.previous_count_ratio must be between 0 and 1")
+    if config.health.apple_min_items < 1 or config.health.steam_min_items < 1:
+        raise ValueError("health source minimums must be positive")
