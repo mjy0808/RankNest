@@ -53,7 +53,7 @@ python3 -m http.server 8000 --directory reports
 
 ## GitHub Pages 与飞书通知
 
-`.github/workflows/daily-radar.yml` 已设置每天北京时间 08:30 运行，也支持手动触发。工作流会把完整日报和历史归档发布到 GitHub Pages，然后向飞书群发送三个分榜各 Top 3 的卡片摘要和完整报告链接。失败时会发送独立告警；成功通知按报告日期去重。
+`.github/workflows/daily-radar.yml` 已设置每天北京时间 08:17 主触发、10:17 备用触发，也支持手动触发。备用触发会先检查当天是否已有成功记录，有则跳过；检查异常时会继续运行，以避免漏报。手动触发始终执行。工作流会把完整日报和历史归档发布到 GitHub Pages，然后向飞书群发送三个分榜各 Top 3 的卡片摘要和完整报告链接。失败时会发送独立告警；成功通知按报告日期去重。
 
 在仓库的 Actions secrets 中配置 `LARK_WEBHOOK_URL`。实际 Webhook 只存放在 Secret 中；代码、工作流和日志都不包含它。
 

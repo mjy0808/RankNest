@@ -2,10 +2,14 @@ name: Daily app and game radar
 
 on:
   schedule:
-    - cron: "30 0 * * *"
+    # 08:17 Asia/Shanghai. Changing the minute also refreshes GitHub's scheduler registration.
+    - cron: "17 0 * * *"
+    # 10:17 Asia/Shanghai fallback. The preflight job skips it when today's report already succeeded.
+    - cron: "17 2 * * *"
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -15,7 +19,68 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      should_run: ${{ steps.dedupe.outputs.should_run }}
+    steps:
+      - name: Skip duplicate scheduled run
+        id: dedupe
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (context.eventName !== "schedule") {
+              core.info("Manual dispatch always runs.");
+              core.setOutput("should_run", "true");
+              return;
+            }
+
+            try {
+              const formatter = new Intl.DateTimeFormat("en-US", {
+                timeZone: "Asia/Shanghai",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+              });
+              const parts = Object.fromEntries(
+                formatter.formatToParts(new Date()).map(({ type, value }) => [type, value]),
+              );
+              const localDate = `${parts.year}-${parts.month}-${parts.day}`;
+              const dayStart = new Date(`${localDate}T00:00:00+08:00`);
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "daily-radar.yml",
+                status: "success",
+                per_page: 100,
+              });
+              const successfulRun = data.workflow_runs.find(
+                (run) => run.id !== context.runId && new Date(run.created_at) >= dayStart,
+              );
+
+              if (successfulRun) {
+                core.info(`Skipping: run ${successfulRun.id} already succeeded on ${localDate}.`);
+                core.setOutput("should_run", "false");
+                await core.summary
+                  .addHeading("Daily radar already completed")
+                  .addLink(`Successful run ${successfulRun.id}`, successfulRun.html_url)
+                  .write();
+                return;
+              }
+
+              core.info(`No successful run found for ${localDate}; continuing.`);
+              core.setOutput("should_run", "true");
+            } catch (error) {
+              core.warning(`Could not check today's runs; continuing to avoid a missed report: ${error.message}`);
+              core.setOutput("should_run", "true");
+            }
+
   build:
+    needs: preflight
+    if: ${{ needs.preflight.outputs.should_run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -109,8 +174,8 @@ jobs:
 
   notify-failure:
     runs-on: ubuntu-latest
-    needs: [build, deploy-and-notify]
-    if: ${{ always() && (needs.build.result == 'failure' || needs.deploy-and-notify.result == 'failure') }}
+    needs: [preflight, build, deploy-and-notify]
+    if: ${{ always() && (needs.preflight.result == 'failure' || needs.build.result == 'failure' || needs.deploy-and-notify.result == 'failure') }}
     permissions:
       contents: read
     steps:
@@ -123,6 +188,6 @@ jobs:
       - name: Notify Lark about workflow failure
         env:
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          FAILURE_DETAIL: build=${{ needs.build.result }}, deploy-and-notify=${{ needs.deploy-and-notify.result }}
+          FAILURE_DETAIL: preflight=${{ needs.preflight.result }}, build=${{ needs.build.result }}, deploy-and-notify=${{ needs.deploy-and-notify.result }}
           WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python -m app_radar.lark --failure --detail "$FAILURE_DETAIL" --url "$WORKFLOW_URL"
