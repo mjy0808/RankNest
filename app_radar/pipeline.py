@@ -96,8 +96,17 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
         statuses = assess_source_health(statuses, previous_counts, config.health)
         fingerprint = _fingerprint(candidates, statuses)
         history = store.load_history(local_now.date(), config.report.timezone)
+        first_seen_days = store.load_first_seen_days(
+            local_now.date(), config.report.timezone, set(merged)
+        )
+        for candidate in candidates:
+            candidate.metadata["first_seen_days"] = first_seen_days.get(candidate.key, 0)
         scored = score_all(candidates, history, statuses, local_now.date())
-        sections = select_segment_items(scored, config.report.segment_counts)
+        sections = select_segment_items(
+            scored,
+            config.report.segment_counts,
+            config.report.segment_early_counts,
+        )
         backtest = build_backtest(candidates, history)
         selected_ranks = {
             item.candidate.key: rank

@@ -4,6 +4,9 @@
     "app_count": 8,
     "mobile_game_count": 6,
     "steam_game_count": 6,
+    "early_app_count": 2,
+    "early_mobile_game_count": 2,
+    "early_steam_game_count": 2,
     "timezone": "Asia/Shanghai"
   },
   "apple": {
@@ -17,7 +20,7 @@
   "steam": {
     "enabled": true,
     "markets": ["us", "gb", "de", "jp", "kr", "br"],
-    "charts": ["topsellers", "popularnew"],
+    "charts": ["topsellers", "popularnew", "popularcomingsoon"],
     "limit": 100,
     "workers": 4
   },

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from statistics import mean
 from typing import Any
@@ -38,6 +39,12 @@ def _searchable(candidate: Candidate) -> str:
     return " ".join(str(value).casefold() for value in values if value)
 
 
+def _contains_term(text: str, term: str) -> bool:
+    if all(character.isascii() and (character.isalnum() or character in " -") for character in term):
+        return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
+    return term in text
+
+
 def classify_theme(candidate: Candidate) -> tuple[str, str]:
     text = _searchable(candidate)
     primary = str(candidate.metadata.get("genre", "")).casefold()
@@ -63,15 +70,15 @@ def classify_theme(candidate: Candidate) -> tuple[str, str]:
         else:
             key = "other_app"
     else:
-        if any(term in text for term in ("puzzle", "sort", "block", "word", "jigsaw", "sudoku", "jam")):
+        if any(_contains_term(text, term) for term in ("puzzle", "sort", "block", "word", "jigsaw", "sudoku", "jam")):
             key = "puzzle"
-        elif any(term in text for term in ("idle", "clicker", "tycoon", "factory")):
+        elif any(_contains_term(text, term) for term in ("idle", "clicker", "tycoon", "factory")):
             key = "idle_tycoon"
-        elif any(term in text for term in ("repair", "simulator", "simulation")):
+        elif any(_contains_term(text, term) for term in ("repair", "simulator", "simulation")):
             key = "repair_simulation"
-        elif any(term in text for term in ("card", "deck", "rogue")):
+        elif any(_contains_term(text, term) for term in ("card", "deck", "rogue")):
             key = "card_rogue"
-        elif any(term in text for term in ("strategy", "rpg", "role playing", "tactical")):
+        elif any(_contains_term(text, term) for term in ("strategy", "rpg", "role playing", "tactical")):
             key = "strategy_rpg"
         elif candidate.segment == "mobile_game":
             key = "casual_game"

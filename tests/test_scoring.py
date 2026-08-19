@@ -169,10 +169,28 @@ class ScoringTests(unittest.TestCase):
         live_service = make_candidate("live-service", segment="steam_game", rank=2, reviews=700)
         live_service.name = "Anime Action Online"
         live_service.metadata = {"steam_tag_ids": "[113,19,122,4085]"}
+        heavy_upcoming = make_candidate(
+            "heavy-upcoming", segment="steam_game", rank=3, reviews=0
+        )
+        heavy_upcoming.name = "Onimusha: Way of the Sword"
+        heavy_upcoming.metadata = {
+            "steam_tag_ids": "[19,4106,4182,4231,4608,29482,4777]"
+        }
+        major_mobile = make_candidate(
+            "major-mobile", segment="mobile_game", rank=1, reviews=0
+        )
+        major_mobile.name = "Fantasy Journey: New Era"
+        major_mobile.developer = "Guangzhou NetEase Computer System Co.Ltd"
+        major_mobile.metadata = {
+            "genre": "Games", "file_size_bytes": "1068915712"
+        }
         safe_game = make_candidate("safe-game", segment="steam_game", rank=10, reviews=500)
         safe_game.name = "Tiny Repair Simulator"
         scored = score_all(
-            [safe_app, government, proxy, sequel, live_service, safe_game],
+            [
+                safe_app, government, proxy, sequel, live_service,
+                heavy_upcoming, major_mobile, safe_game,
+            ],
             {}, statuses(), date(2026, 8, 19)
         )
         sections = select_segment_items(
@@ -186,6 +204,42 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("高合规风险", proxy.metadata["opportunity_risks"])
         self.assertIn("大型制作规模", sequel.metadata["opportunity_risks"])
         self.assertIn("大型制作规模", live_service.metadata["opportunity_risks"])
+        self.assertIn("大型制作规模", heavy_upcoming.metadata["opportunity_risks"])
+        self.assertNotEqual(heavy_upcoming.metadata["opportunity_theme"], "短回合益智")
+        self.assertIn("续作或成熟 IP", major_mobile.metadata["opportunity_risks"])
+        self.assertIn("大型制作规模", major_mobile.metadata["opportunity_risks"])
+
+    def test_early_slot_surfaces_low_saturation_newcomer(self) -> None:
+        established = make_candidate("established", rank=2, reviews=8_000)
+        established.release_date = date(2025, 1, 1)
+        newcomer = make_candidate("newcomer-early", rank=75, reviews=12)
+        newcomer.release_date = date(2026, 8, 18)
+        newcomer.ranks = {"us:top": 75, "jp:top": 82}
+        newcomer.metadata = {"genre": "Music", "first_seen_days": 0}
+        scored = score_all(
+            [established, newcomer], {}, statuses(), date(2026, 8, 19)
+        )
+        selected = select_segment_items(
+            scored,
+            {"app": 2, "mobile_game": 1, "steam_game": 1},
+            {"app": 1, "mobile_game": 0, "steam_game": 0},
+        )["app"]
+        self.assertIn("newcomer-early", {item.candidate.external_id for item in selected})
+        self.assertTrue(newcomer.metadata["early_candidate"])
+        self.assertGreaterEqual(newcomer.metadata["early_signal_score"], 62)
+        self.assertLessEqual(newcomer.metadata["competition_score"], 35)
+
+    def test_saturated_product_gets_stronger_competition_penalty(self) -> None:
+        early = make_candidate("low-saturation", rank=10, reviews=80)
+        crowded = make_candidate("high-saturation", rank=10, reviews=500_000)
+        scored = score_all([early, crowded], {}, statuses(), date(2026, 8, 19))
+        self.assertLess(
+            early.metadata["competition_score"], crowded.metadata["competition_score"]
+        )
+        self.assertGreater(
+            early.metadata["competition_multiplier"],
+            crowded.metadata["competition_multiplier"],
+        )
 
 
 if __name__ == "__main__":

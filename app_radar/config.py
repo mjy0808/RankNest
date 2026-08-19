@@ -12,6 +12,9 @@ class ReportConfig:
     app_count: int = 8
     mobile_game_count: int = 6
     steam_game_count: int = 6
+    early_app_count: int = 2
+    early_mobile_game_count: int = 2
+    early_steam_game_count: int = 2
     timezone: str = "Asia/Shanghai"
 
     @property
@@ -24,6 +27,14 @@ class ReportConfig:
             "app": self.app_count,
             "mobile_game": self.mobile_game_count,
             "steam_game": self.steam_game_count,
+        }
+
+    @property
+    def segment_early_counts(self) -> dict[str, int]:
+        return {
+            "app": self.early_app_count,
+            "mobile_game": self.early_mobile_game_count,
+            "steam_game": self.early_steam_game_count,
         }
 
 
@@ -43,7 +54,7 @@ class AppleConfig:
 class SteamConfig:
     enabled: bool = True
     markets: tuple[str, ...] = ("us", "gb", "de", "jp", "kr", "br")
-    charts: tuple[str, ...] = ("topsellers", "popularnew")
+    charts: tuple[str, ...] = ("topsellers", "popularnew", "popularcomingsoon")
     limit: int = 100
     workers: int = 4
 
@@ -112,6 +123,9 @@ def load_config(path: Path) -> Config:
             app_count=int(report.get("app_count", 8)),
             mobile_game_count=int(report.get("mobile_game_count", 6)),
             steam_game_count=int(report.get("steam_game_count", 6)),
+            early_app_count=int(report.get("early_app_count", 2)),
+            early_mobile_game_count=int(report.get("early_mobile_game_count", 2)),
+            early_steam_game_count=int(report.get("early_steam_game_count", 2)),
             timezone=str(report.get("timezone", ReportConfig.timezone)),
         ),
         apple=AppleConfig(
@@ -158,6 +172,9 @@ def load_config(path: Path) -> Config:
 def _validate(config: Config) -> None:
     if any(value < 1 for value in config.report.segment_counts.values()):
         raise ValueError("all report segment counts must be positive")
+    for segment, early_count in config.report.segment_early_counts.items():
+        if not 0 <= early_count <= config.report.segment_counts[segment]:
+            raise ValueError("early report counts must be between zero and their segment total")
     if not 1 <= config.apple.limit <= 100:
         raise ValueError("apple.limit must be between 1 and 100")
     if not 1 <= config.steam.limit <= 100:
