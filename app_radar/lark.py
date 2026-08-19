@@ -25,6 +25,8 @@ def _top_lines(payload: dict[str, Any], count: int = 3) -> list[str]:
     sections = payload.get("sections", {})
     for segment in ("app", "mobile_game", "steam_game"):
         items = sections.get(segment, []) if isinstance(sections, dict) else []
+        if not items:
+            continue
         lines.append(f"**{SEGMENT_TITLES[segment]} Top {min(count, len(items))}**")
         for item in items[:count]:
             reasons = item.get("reasons") or []
@@ -112,7 +114,7 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
                     },
                     {
                         "tag": "button",
-                        "text": {"tag": "plain_text", "content": "查看完整 Top 20 报告"},
+                        "text": {"tag": "plain_text", "content": "查看完整机会报告"},
                         "type": "primary",
                         "width": "fill",
                         "size": "medium",

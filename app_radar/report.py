@@ -352,6 +352,13 @@ def render_html(
     navigation = f'<a href="{html.escape(history_href, quote=True)}">历史日报</a>'
     if latest_href:
         navigation += f'<a href="{html.escape(latest_href, quote=True)}">返回最新</a>'
+    summary_cards = (
+        f'<div><strong>{total_candidates:,}</strong><span>监控候选</span></div>'
+        + "".join(
+            f'<div><strong>{len(items)}</strong><span>{html.escape(SEGMENT_LABELS[segment])}</span></div>'
+            for segment, items in sections.items()
+        )
+    )
     return f"""<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -360,7 +367,7 @@ def render_html(
   *{{box-sizing:border-box}} body{{margin:0;background:#f3f5f7;color:#16202a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.55}}
   .wrap{{max-width:850px;margin:0 auto;padding:28px 16px 52px}} .hero{{background:linear-gradient(135deg,#0d1b2a,#173a44);color:#fff;border-radius:22px;padding:30px;box-shadow:0 16px 45px rgba(13,27,42,.18)}}
   .eyebrow{{color:#7ee0c3;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:30px;line-height:1.2;margin:8px 0}} .sub{{color:#c7d6da;margin:0}} .trace{{color:#86a2aa;font-size:11px;margin-top:9px}}
-  .summary{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:24px}} .summary div{{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px}} .summary strong{{display:block;font-size:22px}} .summary span{{font-size:12px;color:#bfd0d4}}
+  .summary{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:24px}} .summary div{{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px}} .summary strong{{display:block;font-size:22px}} .summary span{{font-size:12px;color:#bfd0d4}}
   .health{{font-size:12px;color:#bfd0d4;margin-top:12px}} .health b{{color:#7ee0c3}} .notice{{margin:16px 0;background:#fff6d9;color:#6d5312;border:1px solid #f1d987;border-radius:14px;padding:13px 16px}}
   .ranking,.themes,.validation{{margin-top:30px}} .section-title{{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid #173a44;margin:0 2px 12px;padding:0 2px 8px}} .section-title span{{font-size:23px;font-weight:900}} .section-title small{{color:#6d8088}}
   .card{{position:relative;display:grid;grid-template-columns:34px 76px 1fr;gap:14px;margin:14px 0;background:#fff;border:1px solid #e3e8eb;border-radius:18px;padding:18px;box-shadow:0 8px 24px rgba(25,45,55,.05)}}
@@ -377,12 +384,7 @@ def render_html(
     <div class="eyebrow">Daily Potential Radar</div><h1>{html.escape(title)}</h1>
     <p class="sub">同时追踪早期苗头与已验证增长，优先寻找尚未高度饱和、实现边界清晰且适合小团队切入的机会。</p>
     <div class="trace">{html.escape(trace)} · {generated_label}</div>
-    <div class="summary">
-      <div><strong>{total_candidates:,}</strong><span>监控候选</span></div>
-      <div><strong>{len(sections.get('app', []))}</strong><span>App</span></div>
-      <div><strong>{len(sections.get('mobile_game', []))}</strong><span>手游</span></div>
-      <div><strong>{len(sections.get('steam_game', []))}</strong><span>Steam 游戏</span></div>
-    </div>
+    <div class="summary">{summary_cards}</div>
     <div class="health"><b>{early_count} 个早期苗头</b> · {validated_count} 个已验证机会 · {watch_count} 个普通观察　|　{healthy} 个健康数据源 · {degraded} 降级 · {failed} 失败</div>
     <nav class="nav">{navigation}</nav>
   </header>

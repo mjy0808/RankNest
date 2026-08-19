@@ -11,10 +11,10 @@ class ReportConfig:
     title: str = "全球高增长产品机会日报"
     app_count: int = 8
     mobile_game_count: int = 6
-    steam_game_count: int = 6
+    steam_game_count: int = 0
     early_app_count: int = 2
     early_mobile_game_count: int = 2
-    early_steam_game_count: int = 2
+    early_steam_game_count: int = 0
     timezone: str = "Asia/Shanghai"
 
     @property
@@ -23,18 +23,24 @@ class ReportConfig:
 
     @property
     def segment_counts(self) -> dict[str, int]:
-        return {
+        values = {
             "app": self.app_count,
             "mobile_game": self.mobile_game_count,
             "steam_game": self.steam_game_count,
         }
+        return {segment: count for segment, count in values.items() if count > 0}
 
     @property
     def segment_early_counts(self) -> dict[str, int]:
-        return {
+        values = {
             "app": self.early_app_count,
             "mobile_game": self.early_mobile_game_count,
             "steam_game": self.early_steam_game_count,
+        }
+        return {
+            segment: count
+            for segment, count in values.items()
+            if self.segment_counts.get(segment, 0) > 0
         }
 
 
@@ -52,7 +58,7 @@ class AppleConfig:
 
 @dataclass(frozen=True)
 class SteamConfig:
-    enabled: bool = True
+    enabled: bool = False
     markets: tuple[str, ...] = ("us", "gb", "de", "jp", "kr", "br")
     charts: tuple[str, ...] = ("topsellers", "popularnew", "popularcomingsoon")
     limit: int = 100
@@ -122,10 +128,12 @@ def load_config(path: Path) -> Config:
             title=str(report.get("title", ReportConfig.title)),
             app_count=int(report.get("app_count", 8)),
             mobile_game_count=int(report.get("mobile_game_count", 6)),
-            steam_game_count=int(report.get("steam_game_count", 6)),
+            steam_game_count=int(report.get("steam_game_count", ReportConfig.steam_game_count)),
             early_app_count=int(report.get("early_app_count", 2)),
             early_mobile_game_count=int(report.get("early_mobile_game_count", 2)),
-            early_steam_game_count=int(report.get("early_steam_game_count", 2)),
+            early_steam_game_count=int(
+                report.get("early_steam_game_count", ReportConfig.early_steam_game_count)
+            ),
             timezone=str(report.get("timezone", ReportConfig.timezone)),
         ),
         apple=AppleConfig(
@@ -139,7 +147,7 @@ def load_config(path: Path) -> Config:
             workers=int(apple.get("workers", AppleConfig.workers)),
         ),
         steam=SteamConfig(
-            enabled=bool(steam.get("enabled", True)),
+            enabled=bool(steam.get("enabled", SteamConfig.enabled)),
             markets=tuple(str(x).lower() for x in steam.get("markets", SteamConfig.markets)),
             charts=tuple(str(x) for x in steam.get("charts", SteamConfig.charts)),
             limit=int(steam.get("limit", SteamConfig.limit)),
@@ -170,10 +178,20 @@ def load_config(path: Path) -> Config:
 
 
 def _validate(config: Config) -> None:
-    if any(value < 1 for value in config.report.segment_counts.values()):
-        raise ValueError("all report segment counts must be positive")
-    for segment, early_count in config.report.segment_early_counts.items():
-        if not 0 <= early_count <= config.report.segment_counts[segment]:
+    segment_counts = {
+        "app": config.report.app_count,
+        "mobile_game": config.report.mobile_game_count,
+        "steam_game": config.report.steam_game_count,
+    }
+    early_counts = {
+        "app": config.report.early_app_count,
+        "mobile_game": config.report.early_mobile_game_count,
+        "steam_game": config.report.early_steam_game_count,
+    }
+    if any(value < 0 for value in segment_counts.values()) or not any(segment_counts.values()):
+        raise ValueError("report segment counts must be non-negative with at least one enabled")
+    for segment, early_count in early_counts.items():
+        if not 0 <= early_count <= segment_counts[segment]:
             raise ValueError("early report counts must be between zero and their segment total")
     if not 1 <= config.apple.limit <= 100:
         raise ValueError("apple.limit must be between 1 and 100")

@@ -48,6 +48,7 @@ class LarkTests(unittest.TestCase):
         self.assertIn("7 日历史命中率", body)
         self.assertIn("更早期苗头", body)
         self.assertIn("Fresh Notes(78)", body)
+        self.assertNotIn("Steam 游戏", body)
         self.assertIn("https://mjy0808.github.io/RankNest/", body)
 
     def test_failure_card_links_to_workflow(self) -> None:

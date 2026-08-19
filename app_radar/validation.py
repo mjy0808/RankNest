@@ -20,6 +20,7 @@ def build_backtest(
     candidates: list[Candidate], history: dict[int, HistorySnapshot]
 ) -> dict[str, Any]:
     current = {candidate.key: candidate for candidate in candidates}
+    active_segments = {candidate.segment for candidate in candidates}
     horizons: dict[str, Any] = {}
     for horizon in VALIDATION_HORIZONS:
         snapshot = history.get(horizon)
@@ -29,6 +30,7 @@ def build_backtest(
             (key, observation)
             for key, observation in snapshot.observations.items()
             if observation.selected_rank is not None
+            and observation.segment in active_segments
         ]
         if not selected:
             continue

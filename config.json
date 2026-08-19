@@ -3,10 +3,10 @@
     "title": "全球高增长产品机会日报",
     "app_count": 8,
     "mobile_game_count": 6,
-    "steam_game_count": 6,
+    "steam_game_count": 0,
     "early_app_count": 2,
     "early_mobile_game_count": 2,
-    "early_steam_game_count": 2,
+    "early_steam_game_count": 0,
     "timezone": "Asia/Shanghai"
   },
   "apple": {
@@ -18,7 +18,7 @@
     "workers": 6
   },
   "steam": {
-    "enabled": true,
+    "enabled": false,
     "markets": ["us", "gb", "de", "jp", "kr", "br"],
     "charts": ["topsellers", "popularnew", "popularcomingsoon"],
     "limit": 100,
