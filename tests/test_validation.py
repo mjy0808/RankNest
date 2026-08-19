@@ -43,6 +43,18 @@ class ValidationTests(unittest.TestCase):
                 name="Missing Tool",
                 segment="app",
             ),
+            ("steam", "old-game"): PreviousObservation(
+                captured_at=captured,
+                run_day=date(2026, 8, 12),
+                average_rank=5,
+                best_rank=3,
+                review_count=500,
+                market_count=2,
+                social_mentions=0,
+                selected_rank=1,
+                name="Old Steam Recommendation",
+                segment="steam_game",
+            ),
         }
         snapshot = HistorySnapshot(
             run_id=1,

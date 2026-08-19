@@ -51,6 +51,10 @@ SEGMENT_WEIGHTS: dict[str, dict[str, float]] = {
 
 HORIZON_WEIGHTS = {1: 0.35, 3: 0.25, 7: 0.20, 14: 0.12, 30: 0.08}
 MIN_OPPORTUNITY_FIT = {"app": 72, "mobile_game": 72, "steam_game": 70}
+MIN_EARLY_OPPORTUNITY_FIT = {"app": 58, "mobile_game": 55, "steam_game": 58}
+MIN_EARLY_SIGNAL = {"app": 62, "mobile_game": 58, "steam_game": 62}
+EARLY_REVIEW_CAP = {"app": 12_000, "mobile_game": 20_000, "steam_game": 3_000}
+MATURE_REVIEW_LEVEL = {"app": 40_000, "mobile_game": 100_000, "steam_game": 10_000}
 EXCLUDED_OPPORTUNITY_TAGS = {
     "成熟头部产品",
     "平台或网络效应较强",
@@ -80,6 +84,11 @@ KNOWN_IP_REFERENCE_TERMS = {
     "lord of the rings", "game of thrones",
     "microsoft flight simulator",
 }
+MAJOR_GAME_PUBLISHER_TERMS = {
+    "activision", "bandai namco", "blizzard", "capcom", "electronic arts",
+    "gameloft", "king.com", "konami", "netease", "rockstar", "sega",
+    "square enix", "supercell", "take-two", "tencent", "ubisoft",
+}
 
 # Stable tag ids emitted by Steam's own search result rows. Only use tags with
 # clear production/distribution implications; unknown ids remain neutral.
@@ -87,6 +96,9 @@ STEAM_OPEN_WORLD_TAGS = {"1695", "128"}  # Open World, Massively Multiplayer
 STEAM_LIVE_SERVICE_TAGS = {"113", "19", "21", "122", "4085", "1646"}
 STEAM_NETWORK_TAGS = {"3859", "1685", "3843", "1775", "128"}
 STEAM_LIGHTWEIGHT_TAGS = {"492", "597", "599", "1664"}  # Indie, Casual, Simulation, Puzzle
+STEAM_HIGH_PRODUCTION_TAGS = {
+    "19", "21", "122", "1695", "4106", "4231", "4608", "29482", "4777"
+}
 
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -194,6 +206,12 @@ def _steam_tag_ids(candidate: Candidate) -> set[str]:
     return set(re.findall(r"\d+", raw))
 
 
+def _contains_term(text: str, term: str) -> bool:
+    if re.fullmatch(r"[a-z0-9 -]+", term):
+        return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
+    return term in text
+
+
 def _implementation_feasibility(
     candidate: Candidate,
 ) -> tuple[float, list[str], list[str]]:
@@ -212,7 +230,7 @@ def _implementation_feasibility(
             tags.append("平台或网络效应较强")
     else:
         feasibility = 0.58 if candidate.segment == "mobile_game" else 0.50
-        if any(term in name for term in SIMPLE_GAME_TERMS) or genres.intersection(
+        if any(_contains_term(name, term) for term in SIMPLE_GAME_TERMS) or genres.intersection(
             SIMPLE_GAME_GENRES
         ):
             feasibility += 0.25
@@ -222,7 +240,7 @@ def _implementation_feasibility(
         ):
             feasibility += 0.12
             tags.append("独立或轻量类型")
-        if any(term in name for term in COMPLEX_GAME_TERMS) or genres.intersection(
+        if any(_contains_term(name, term) for term in COMPLEX_GAME_TERMS) or genres.intersection(
             COMPLEX_GAME_GENRES
         ):
             feasibility -= 0.25
@@ -242,8 +260,11 @@ def _implementation_feasibility(
             if "113" in steam_tags and steam_tags.intersection(STEAM_NETWORK_TAGS):
                 feasibility -= 0.20
                 risks.append("平台或网络效应较强")
+            if len(steam_tags.intersection(STEAM_HIGH_PRODUCTION_TAGS)) >= 5:
+                feasibility -= 0.30
+                risks.append("大型制作规模")
         sequel = re.search(r"(?:\b(?:ii|iii|iv)\b|(?:\s|:|-)[2-9])$", name)
-        is_simple_game = any(term in name for term in SIMPLE_GAME_TERMS) or bool(
+        is_simple_game = any(_contains_term(name, term) for term in SIMPLE_GAME_TERMS) or bool(
             genres.intersection(SIMPLE_GAME_GENRES)
         )
         if candidate.segment == "steam_game" and sequel and not is_simple_game:
@@ -254,6 +275,11 @@ def _implementation_feasibility(
     ):
         feasibility -= 0.30
         risks.append("存在品牌/IP 风险")
+    if candidate.segment != "app" and any(
+        term in text for term in MAJOR_GAME_PUBLISHER_TERMS
+    ):
+        feasibility -= 0.25
+        risks.append("续作或成熟 IP")
 
     file_size = candidate.metadata.get("file_size_bytes")
     try:
@@ -263,7 +289,9 @@ def _implementation_feasibility(
     if file_size_bytes and file_size_bytes <= 250_000_000:
         feasibility += 0.08
         tags.append("产品体量较轻")
-    elif file_size_bytes >= 1_500_000_000:
+    elif file_size_bytes >= (
+        800_000_000 if candidate.segment == "mobile_game" else 1_500_000_000
+    ):
         feasibility -= 0.12
         tags.append("资源体量较重")
         if candidate.segment != "app":
@@ -608,6 +636,123 @@ def _raw_score(
     )
 
 
+def _launch_signal(candidate: Candidate, today: date) -> tuple[float, int | None]:
+    if candidate.release_date is None:
+        return 0.20, None
+    age_days = (today - candidate.release_date).days
+    if -180 <= age_days < 0:
+        return 1.0, age_days
+    if age_days <= 30:
+        return 1.0, age_days
+    if age_days <= 90:
+        return 0.80, age_days
+    if age_days <= 180:
+        return 0.55, age_days
+    return 0.05, age_days
+
+
+def _annotate_early_signals(raw_items: list[_RawScore], today: date) -> None:
+    groups: dict[tuple[str, str], list[_RawScore]] = {}
+    for item in raw_items:
+        candidate = item.candidate
+        theme = str(candidate.metadata.get("opportunity_theme_key", "other"))
+        groups.setdefault((candidate.segment, theme), []).append(item)
+
+    for (segment, _), group in groups.items():
+        mature_count = 0
+        for item in group:
+            candidate = item.candidate
+            age_days = (
+                (today - candidate.release_date).days if candidate.release_date else None
+            )
+            if candidate.review_count >= MATURE_REVIEW_LEVEL[segment] or (
+                age_days is not None and age_days > 540 and candidate.best_rank <= 20
+            ):
+                mature_count += 1
+        theme_crowding = _clamp(mature_count / 4)
+
+        for item in group:
+            candidate = item.candidate
+            review_cap = EARLY_REVIEW_CAP[segment]
+            individual_saturation = _clamp(
+                math.log1p(candidate.review_count) / math.log1p(review_cap * 4)
+            )
+            competition = _clamp(
+                0.60 * individual_saturation + 0.40 * theme_crowding
+            )
+            competition_score = round(competition * 100)
+            competition_level = (
+                "低竞争" if competition_score < 35
+                else "中等竞争" if competition_score < 65
+                else "高竞争"
+            )
+
+            launch, age_days = _launch_signal(candidate, today)
+            try:
+                first_seen_days = max(int(candidate.metadata.get("first_seen_days", 0)), 0)
+            except (TypeError, ValueError):
+                first_seen_days = 0
+            emergence = math.exp(-first_seen_days / 7) if first_seen_days <= 45 else 0.05
+            low_saturation = 1 - individual_saturation
+            momentum = max(item.signals["排名动量"], item.signals["口碑动量"])
+            early_base = (
+                0.30 * launch
+                + 0.24 * low_saturation
+                + 0.18 * emergence
+                + 0.16 * momentum
+                + 0.07 * item.signals["市场广度"]
+                + 0.05 * item.signals["讨论热度"]
+            )
+            # Crowded themes can still surface, but need materially stronger leading evidence.
+            early_signal = _clamp(early_base * (0.78 + 0.22 * (1 - theme_crowding)))
+            early_score = round(early_signal * 100)
+            recent_release = age_days is not None and -180 <= age_days <= 180
+            unknown_date_lead = (
+                age_days is None
+                and first_seen_days <= 3
+                and candidate.review_count <= review_cap // 4
+                and (
+                    candidate.market_count >= 2
+                    or int(candidate.metadata.get("hn_exact_mentions", 0)) > 0
+                )
+            )
+            early_candidate = bool(
+                candidate.review_count <= review_cap
+                and early_score >= MIN_EARLY_SIGNAL[segment]
+                and (recent_release or unknown_date_lead)
+            )
+
+            early_reasons: list[str] = []
+            if age_days is not None and age_days < 0:
+                early_reasons.append(f"距上线 {abs(age_days)} 天，已进入即将推出榜")
+            elif age_days is not None and age_days <= 180:
+                early_reasons.append(f"上线仅 {age_days} 天，仍处早期验证窗口")
+            if first_seen_days == 0:
+                early_reasons.append("今天首次进入监控池")
+            elif first_seen_days <= 7:
+                early_reasons.append(f"进入监控池仅 {first_seen_days} 天")
+            if candidate.review_count <= review_cap:
+                early_reasons.append(
+                    f"当前仅 {_compact_review_count(candidate.review_count)} 条评价，尚未高度饱和"
+                )
+            if theme_crowding <= 0.25:
+                early_reasons.append("同主题成熟竞品密度较低")
+
+            candidate.metadata["first_seen_days"] = first_seen_days
+            candidate.metadata["early_candidate"] = early_candidate
+            candidate.metadata["early_signal_score"] = early_score
+            candidate.metadata["early_reasons"] = early_reasons[:3]
+            candidate.metadata["competition_score"] = competition_score
+            candidate.metadata["competition_level"] = competition_level
+            candidate.metadata["theme_mature_competitors"] = mature_count
+
+
+def _compact_review_count(value: int) -> str:
+    if value >= 10_000:
+        return f"{value / 10_000:.1f}万"
+    return f"{value:,}"
+
+
 def _percentile_blend(values: list[float]) -> list[float]:
     if not values or max(values) <= 0:
         return [0.0 for _ in values]
@@ -649,6 +794,7 @@ def score_all(
     today: date,
 ) -> list[ScoredCandidate]:
     raw_items = [_raw_score(candidate, history, statuses, today) for candidate in candidates]
+    _annotate_early_signals(raw_items, today)
     scored: list[ScoredCandidate] = []
     for segment in SEGMENT_LABELS:
         group = [item for item in raw_items if item.candidate.segment == segment]
@@ -667,12 +813,26 @@ def score_all(
             base_score = round(sum(components.values()), 2)
             opportunity_fit = int(item.candidate.metadata.get("opportunity_fit", 0)) / 100
             actionability_multiplier = 0.45 + 0.55 * opportunity_fit
-            final_score = round(base_score * actionability_multiplier, 2)
+            competition_score = int(
+                item.candidate.metadata.get("competition_score", 0)
+            ) / 100
+            competition_multiplier = 0.72 + 0.28 * (1 - competition_score)
+            final_score = round(
+                base_score * actionability_multiplier * competition_multiplier, 2
+            )
             item.candidate.metadata["base_momentum_score"] = base_score
             item.candidate.metadata["actionability_multiplier"] = round(
                 actionability_multiplier, 3
             )
-            reasons = list(dict.fromkeys(item.reasons))
+            item.candidate.metadata["competition_multiplier"] = round(
+                competition_multiplier, 3
+            )
+            leading_reasons = (
+                item.candidate.metadata.get("early_reasons", [])
+                if item.candidate.metadata.get("early_candidate")
+                else []
+            )
+            reasons = list(dict.fromkeys([*leading_reasons[:1], *item.reasons]))
             if len(reasons) < 2:
                 reasons.append(f"当前最佳榜位 #{item.candidate.best_rank}")
             if item.candidate.rating >= 4.5 and len(reasons) < 3:
@@ -691,22 +851,26 @@ def score_all(
 
 
 def select_segment_items(
-    scored: list[ScoredCandidate], segment_counts: dict[str, int]
+    scored: list[ScoredCandidate],
+    segment_counts: dict[str, int],
+    early_counts: dict[str, int] | None = None,
 ) -> dict[str, list[ScoredCandidate]]:
-    def actionable(item: ScoredCandidate) -> bool:
+    def actionable(item: ScoredCandidate, early: bool = False) -> bool:
         fit = int(item.candidate.metadata.get("opportunity_fit", 0))
         tags = set(item.candidate.metadata.get("opportunity_tags", []))
         risks = set(item.candidate.metadata.get("opportunity_risks", []))
-        threshold = MIN_OPPORTUNITY_FIT[item.candidate.segment]
+        thresholds = MIN_EARLY_OPPORTUNITY_FIT if early else MIN_OPPORTUNITY_FIT
+        threshold = thresholds[item.candidate.segment]
         return fit >= threshold and not (tags | risks).intersection(EXCLUDED_OPPORTUNITY_TAGS)
 
+    early_counts = early_counts or {}
     selected: dict[str, list[ScoredCandidate]] = {}
     for segment, count in segment_counts.items():
-        eligible = [
+        standard = [
             item for item in scored
             if item.candidate.segment == segment and actionable(item)
         ]
-        eligible.sort(
+        standard.sort(
             key=lambda item: (
                 item.candidate.metadata.get("opportunity_tier") == "validated",
                 item.score,
@@ -714,5 +878,37 @@ def select_segment_items(
             ),
             reverse=True,
         )
-        selected[segment] = eligible[:count]
+        early_pool = [
+            item for item in scored
+            if item.candidate.segment == segment
+            and item.candidate.metadata.get("early_candidate")
+            and actionable(item, early=True)
+        ]
+        early_pool.sort(
+            key=lambda item: (
+                int(item.candidate.metadata.get("early_signal_score", 0)),
+                item.score,
+            ),
+            reverse=True,
+        )
+        reserve = min(max(int(early_counts.get(segment, 0)), 0), count)
+        early_picks = early_pool[:reserve]
+        picked_keys = {item.candidate.key for item in early_picks}
+        remaining = [item for item in standard if item.candidate.key not in picked_keys]
+        items = early_picks + remaining[: max(count - len(early_picks), 0)]
+        picked_keys = {item.candidate.key for item in items}
+        if len(items) < count:
+            items.extend(
+                item for item in early_pool
+                if item.candidate.key not in picked_keys
+            )
+        items = items[:count]
+        items.sort(
+            key=lambda item: (
+                item.candidate.metadata.get("opportunity_tier") == "validated",
+                item.score,
+            ),
+            reverse=True,
+        )
+        selected[segment] = items
     return selected

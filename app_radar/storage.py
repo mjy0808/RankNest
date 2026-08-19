@@ -83,6 +83,10 @@ SNAPSHOT_METADATA_KEYS = {
     "opportunity_tier",
     "opportunity_theme",
     "confidence_score",
+    "early_signal_score",
+    "early_candidate",
+    "competition_score",
+    "competition_level",
 }
 
 
@@ -278,6 +282,34 @@ class RadarStore:
             if isinstance(status, dict)
             and status.get("state", "healthy" if status.get("ok") else "failed") == "healthy"
         }
+
+    def load_first_seen_days(
+        self,
+        current_day: date,
+        timezone_name: str,
+        candidate_keys: set[tuple[str, str]],
+    ) -> dict[tuple[str, str], int]:
+        """Return days since the first historical sighting; unseen products are day zero."""
+        first_seen = {key: 0 for key in candidate_keys}
+        if not candidate_keys:
+            return first_seen
+        rows = self.connection.execute(
+            """
+            SELECT o.source, o.external_id, MIN(r.run_day)
+            FROM runs r JOIN observations o ON o.run_id = r.id
+            WHERE r.timezone = ? AND r.run_day < ?
+            GROUP BY o.source, o.external_id
+            """,
+            (timezone_name, current_day.isoformat()),
+        )
+        for source, external_id, first_day_text in rows:
+            key = (str(source), str(external_id))
+            if key in first_seen and first_day_text:
+                first_seen[key] = max(
+                    (current_day - date.fromisoformat(str(first_day_text))).days,
+                    0,
+                )
+        return first_seen
 
     def load_selected_streaks(
         self,

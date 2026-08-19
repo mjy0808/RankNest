@@ -51,6 +51,13 @@ class StorageAndReportTests(unittest.TestCase):
                     store.connection.execute("SELECT metadata_json FROM observations").fetchone()[0]
                 )
                 self.assertNotIn("opportunity_card", stored_metadata)
+                first_seen = store.load_first_seen_days(
+                    date(2026, 8, 12),
+                    "Asia/Shanghai",
+                    {candidate.key, ("apple", "unseen")},
+                )
+                self.assertEqual(first_seen[candidate.key], 1)
+                self.assertEqual(first_seen[("apple", "unseen")], 0)
 
             sections = select_segment_items(scored, {"app": 1, "mobile_game": 1, "steam_game": 1})
             candidate.metadata["selected_streak"] = 2
@@ -73,7 +80,7 @@ class StorageAndReportTests(unittest.TestCase):
             self.assertTrue(artifacts.dated_json.exists())
             self.assertIn("JSON", (root / "reports/archive/index.html").read_text())
             payload = json.loads(artifacts.latest_json.read_text(encoding="utf-8"))
-            self.assertEqual(payload["schema_version"], 4)
+            self.assertEqual(payload["schema_version"], 5)
             self.assertEqual(payload["run_id"], run_id)
             self.assertEqual(payload["data_fingerprint"], "abc123")
             self.assertEqual(payload["sections"]["app"][0]["external_id"], "42")
@@ -82,6 +89,8 @@ class StorageAndReportTests(unittest.TestCase):
             self.assertIn("build_angle", payload["sections"]["app"][0])
             self.assertIn("opportunity_card", payload["sections"]["app"][0])
             self.assertEqual(payload["sections"]["app"][0]["opportunity_tier"], "watch")
+            self.assertIn("early_signal_score", payload["sections"]["app"][0])
+            self.assertIn("competition_score", payload["sections"]["app"][0])
             self.assertEqual(payload["themes"][0]["label"], "高频轻工具")
 
 

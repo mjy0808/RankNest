@@ -25,13 +25,20 @@ def _top_lines(payload: dict[str, Any], count: int = 3) -> list[str]:
     sections = payload.get("sections", {})
     for segment in ("app", "mobile_game", "steam_game"):
         items = sections.get(segment, []) if isinstance(sections, dict) else []
+        if not items:
+            continue
         lines.append(f"**{SEGMENT_TITLES[segment]} Top {min(count, len(items))}**")
         for item in items[:count]:
             reasons = item.get("reasons") or []
             reason = f" · {reasons[0]}" if reasons else ""
             opportunity = int(item.get("opportunity_fit", 0))
             confidence = int(item.get("confidence_score", 0))
-            tier = "已验证" if item.get("opportunity_tier") == "validated" else "观察"
+            tier = (
+                f"早期 {int(item.get('early_signal_score', 0))}"
+                if item.get("early_candidate")
+                else "已验证" if item.get("opportunity_tier") == "validated"
+                else "观察"
+            )
             lines.append(
                 f"{item.get('rank', '-')}. {item.get('name', '未知')} "
                 f"— {float(item.get('score', 0)):.1f} 分 · {tier} {confidence} "
@@ -47,6 +54,22 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
         status.get("state") == "healthy" for status in payload.get("source_status", [])
     )
     content = "\n".join(_top_lines(payload)).strip()
+    sections = payload.get("sections", {})
+    early_items = [
+        item
+        for segment in ("app", "mobile_game", "steam_game")
+        for item in (sections.get(segment, []) if isinstance(sections, dict) else [])
+        if item.get("early_candidate")
+    ]
+    early_items.sort(
+        key=lambda item: int(item.get("early_signal_score", 0)), reverse=True
+    )
+    if early_items:
+        early_text = "、".join(
+            f"{item.get('name', '未知')}({int(item.get('early_signal_score', 0))})"
+            for item in early_items[:6]
+        )
+        content = f"**更早期苗头：** {early_text}\n\n{content}"
     themes = payload.get("themes", [])
     if isinstance(themes, list) and themes:
         theme_text = "、".join(
@@ -91,7 +114,7 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
                     },
                     {
                         "tag": "button",
-                        "text": {"tag": "plain_text", "content": "查看完整 Top 20 报告"},
+                        "text": {"tag": "plain_text", "content": "查看完整机会报告"},
                         "type": "primary",
                         "width": "fill",
                         "size": "medium",
