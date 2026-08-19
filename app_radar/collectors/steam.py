@@ -60,6 +60,12 @@ def parse_results_html(results_html: str, market: str, chart: str) -> list[Candi
             body,
             flags=re.IGNORECASE | re.DOTALL,
         )
+        tags_match = re.search(
+            r'<div[^>]*class="[^"]*search_tags[^"]*"[^>]*>(.*?)</div>',
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        tag_ids_match = re.search(r'data-ds-tagids="([^"]+)"', attributes)
 
         rating = 0.0
         review_count = 0
@@ -85,6 +91,16 @@ def parse_results_html(results_html: str, market: str, chart: str) -> list[Candi
             ranks={f"{market}:{chart}": rank},
             ratings={market: rating} if rating else {},
             review_counts={market: review_count} if review_count else {},
+            metadata={
+                "genres": [
+                    value.strip()
+                    for value in _strip_tags(tags_match.group(1)).split(",")
+                    if value.strip()
+                ]
+                if tags_match
+                else [],
+                "steam_tag_ids": tag_ids_match.group(1) if tag_ids_match else "",
+            },
         )
         parsed.append(candidate)
     return parsed

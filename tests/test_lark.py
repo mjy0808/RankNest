@@ -16,6 +16,12 @@ class LarkTests(unittest.TestCase):
             "run_id": 7,
             "total_candidates": 2549,
             "source_status": [{"state": "healthy"}, {"state": "failed"}],
+            "themes": [{"label": "高频轻工具", "count": 3}],
+            "backtest": {
+                "horizons": {
+                    "7": {"confirmation_rate": 60, "confirmed": 12, "total": 20}
+                }
+            },
             "sections": {
                 "app": [
                     {"rank": 1, "name": "Fresh Notes", "score": 91.2, "reasons": ["榜位上升"]}
@@ -31,6 +37,8 @@ class LarkTests(unittest.TestCase):
         body = str(card)
         self.assertIn("Fresh Notes", body)
         self.assertIn("2,549", body)
+        self.assertIn("高频轻工具", body)
+        self.assertIn("7 日历史命中率", body)
         self.assertIn("https://mjy0808.github.io/RankNest/", body)
 
     def test_failure_card_links_to_workflow(self) -> None:

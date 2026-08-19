@@ -30,9 +30,12 @@ def _top_lines(payload: dict[str, Any], count: int = 3) -> list[str]:
             reasons = item.get("reasons") or []
             reason = f" · {reasons[0]}" if reasons else ""
             opportunity = int(item.get("opportunity_fit", 0))
+            confidence = int(item.get("confidence_score", 0))
+            tier = "已验证" if item.get("opportunity_tier") == "validated" else "观察"
             lines.append(
                 f"{item.get('rank', '-')}. {item.get('name', '未知')} "
-                f"— {float(item.get('score', 0)):.1f} 分 · 可借鉴 {opportunity}{reason}"
+                f"— {float(item.get('score', 0)):.1f} 分 · {tier} {confidence} "
+                f"· 可借鉴 {opportunity}{reason}"
             )
         lines.append("")
     return lines
@@ -44,6 +47,21 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
         status.get("state") == "healthy" for status in payload.get("source_status", [])
     )
     content = "\n".join(_top_lines(payload)).strip()
+    themes = payload.get("themes", [])
+    if isinstance(themes, list) and themes:
+        theme_text = "、".join(
+            f"{theme.get('label', '未知')}({theme.get('count', 0)})"
+            for theme in themes[:3]
+        )
+        content += f"\n\n**今日机会主题：** {theme_text}"
+    horizons = payload.get("backtest", {}).get("horizons", {})
+    if isinstance(horizons, dict) and horizons:
+        latest_horizon = min(horizons, key=lambda value: int(value))
+        metric = horizons[latest_horizon]
+        content += (
+            f"\n**{latest_horizon} 日历史命中率：** "
+            f"{float(metric.get('confirmation_rate', 0)):.0f}%"
+        )
     content += (
         f"\n\n---\n从 **{int(payload.get('total_candidates', 0)):,}** 个候选中筛选"
         f" · **{healthy}** 个健康数据源 · run #{payload.get('run_id', '-')}"

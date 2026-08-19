@@ -47,12 +47,22 @@ class StorageAndReportTests(unittest.TestCase):
                 self.assertEqual(run_id, same_run_id)
                 count = store.connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
                 self.assertEqual(count, 1)
+                stored_metadata = json.loads(
+                    store.connection.execute("SELECT metadata_json FROM observations").fetchone()[0]
+                )
+                self.assertNotIn("opportunity_card", stored_metadata)
 
             sections = select_segment_items(scored, {"app": 1, "mobile_game": 1, "steam_game": 1})
             candidate.metadata["selected_streak"] = 2
             artifacts = write_report(
                 root / "reports", "测试日报", captured, sections, statuses, 1,
                 [], run_id, "abc123",
+                themes=[{
+                    "key": "focused_utility", "label": "高频轻工具", "count": 2,
+                    "validated_count": 1, "average_score": 80.0, "average_fit": 90.0,
+                    "examples": ["Small Wonder", "Another Tool"], "signal": "测试主题信号",
+                }],
+                backtest={"available_horizons": [], "horizons": {}, "definition": "测试"},
             )
             self.assertTrue(artifacts.latest_html.exists())
             self.assertIn("Small Wonder", artifacts.html_body)
@@ -60,13 +70,19 @@ class StorageAndReportTests(unittest.TestCase):
             self.assertIn("首次上榜", artifacts.html_body)
             self.assertTrue((root / "reports/archive/index.html").exists())
             self.assertEqual(artifacts.dated_html.parent.name, "archive")
+            self.assertTrue(artifacts.dated_json.exists())
+            self.assertIn("JSON", (root / "reports/archive/index.html").read_text())
             payload = json.loads(artifacts.latest_json.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema_version"], 4)
             self.assertEqual(payload["run_id"], run_id)
             self.assertEqual(payload["data_fingerprint"], "abc123")
             self.assertEqual(payload["sections"]["app"][0]["external_id"], "42")
             self.assertEqual(payload["sections"]["app"][0]["selected_streak"], 2)
             self.assertIn("opportunity_fit", payload["sections"]["app"][0])
             self.assertIn("build_angle", payload["sections"]["app"][0])
+            self.assertIn("opportunity_card", payload["sections"]["app"][0])
+            self.assertEqual(payload["sections"]["app"][0]["opportunity_tier"], "watch")
+            self.assertEqual(payload["themes"][0]["label"], "高频轻工具")
 
 
 if __name__ == "__main__":

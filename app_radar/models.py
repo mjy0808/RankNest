@@ -107,6 +107,8 @@ class PreviousObservation:
     selected_rank: int | None = None
     ranks: dict[str, int] = field(default_factory=dict)
     review_counts: dict[str, int] = field(default_factory=dict)
+    name: str = ""
+    segment: str = ""
 
 
 @dataclass(frozen=True)

@@ -14,9 +14,11 @@ from .config import Config
 from .http import HttpClient
 from .health import assess_source_health
 from .models import Candidate, SourceStatus
+from .opportunities import build_theme_summaries
 from .report import ReportArtifacts, write_report
 from .scoring import score_all, select_segment_items
 from .storage import RadarStore
+from .validation import build_backtest
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,7 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
         history = store.load_history(local_now.date(), config.report.timezone)
         scored = score_all(candidates, history, statuses, local_now.date())
         sections = select_segment_items(scored, config.report.segment_counts)
+        backtest = build_backtest(candidates, history)
         selected_ranks = {
             item.candidate.key: rank
             for items in sections.values()
@@ -109,6 +112,7 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
                 item.candidate.metadata["selected_streak"] = streaks.get(
                     item.candidate.key, 1
                 )
+        themes = build_theme_summaries(sections)
         run_id, replaced = store.save_run(
             captured_at=captured_at,
             run_day=local_now.date(),
@@ -133,6 +137,8 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
         history_days=sorted(history),
         run_id=run_id,
         fingerprint=fingerprint,
+        themes=themes,
+        backtest=backtest,
         retention_days=config.storage.retention_days,
     )
     return PipelineResult(
