@@ -143,6 +143,12 @@ def enrich_with_lookup(
                 "version": str(item.get("version", "")),
                 "currency": str(item.get("currency", "")),
                 "file_size_bytes": str(item.get("fileSizeBytes", "")),
+                # Risk/topic classification only needs the leading summary;
+                # avoid carrying multi-kilobyte store descriptions through every snapshot.
+                "description": str(item.get("description", ""))[:1_000],
+                "content_advisory": str(item.get("contentAdvisoryRating", "")),
+                "seller_url": str(item.get("sellerUrl", "")),
+                "minimum_os_version": str(item.get("minimumOsVersion", "")),
             }
         )
 

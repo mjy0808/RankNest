@@ -72,6 +72,24 @@ OBSERVATION_COLUMNS = {
     "selected_rank": "INTEGER",
 }
 
+SNAPSHOT_METADATA_KEYS = {
+    "genre",
+    "genres",
+    "file_size_bytes",
+    "steam_tag_ids",
+    "opportunity_fit",
+    "opportunity_tags",
+    "opportunity_risks",
+    "opportunity_tier",
+    "opportunity_theme",
+    "confidence_score",
+}
+
+
+def _snapshot_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    """Keep the SQLite history compact; selected reports retain the full opportunity card."""
+    return {key: metadata[key] for key in SNAPSHOT_METADATA_KEYS if key in metadata}
+
 
 class RadarStore:
     def __init__(self, path: Path) -> None:
@@ -162,14 +180,14 @@ class RadarStore:
             """
             SELECT source, external_id, average_rank, best_rank, review_count,
                    market_count, social_mentions, ranks_json, review_counts_json,
-                   selected_rank
+                   selected_rank, name, segment
             FROM observations WHERE run_id = ?
             """,
             (run_id,),
         )
         for (
             source, external_id, avg_rank, best_rank, reviews, markets, mentions,
-            ranks, counts, selected_rank,
+            ranks, counts, selected_rank, name, segment,
         ) in rows:
             try:
                 rank_values = {str(k): int(v) for k, v in json.loads(ranks or "{}").items()}
@@ -190,6 +208,8 @@ class RadarStore:
                 selected_rank=int(selected_rank) if selected_rank is not None else None,
                 ranks=rank_values,
                 review_counts=review_values,
+                name=str(name or ""),
+                segment=str(segment or ""),
             )
         return observations
 
@@ -197,7 +217,7 @@ class RadarStore:
         self,
         current_day: date,
         timezone_name: str,
-        horizons: tuple[int, ...] = (1, 3, 7),
+        horizons: tuple[int, ...] = (1, 3, 7, 14, 30),
     ) -> dict[int, HistorySnapshot]:
         self.backfill_legacy_run_days(timezone_name)
         snapshots: dict[int, HistorySnapshot] = {}
@@ -355,7 +375,11 @@ class RadarStore:
                         candidate.segment,
                         json.dumps(candidate.review_counts, ensure_ascii=False, separators=(",", ":")),
                         json.dumps(candidate.ratings, ensure_ascii=False, separators=(",", ":")),
-                        json.dumps(candidate.metadata, ensure_ascii=False, separators=(",", ":")),
+                        json.dumps(
+                            _snapshot_metadata(candidate.metadata),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
                         (selected_ranks or {}).get(candidate.key),
                     )
                 )

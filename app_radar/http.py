@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from http.client import HTTPException
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -26,7 +27,7 @@ class HttpClient:
                 )
                 with urlopen(request, timeout=self.timeout) as response:
                     return response.read().decode("utf-8", errors="replace")
-            except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            except (HTTPError, URLError, TimeoutError, OSError, HTTPException) as exc:
                 last_error = exc
                 if attempt < self.retries:
                     time.sleep(0.5 * (2**attempt))

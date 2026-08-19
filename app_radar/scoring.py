@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import date
 from statistics import mean
@@ -12,6 +13,7 @@ from .models import (
     ScoredCandidate,
     SourceStatus,
 )
+from .opportunities import build_opportunity_card
 
 
 SEGMENT_LABELS = {
@@ -47,9 +49,44 @@ SEGMENT_WEIGHTS: dict[str, dict[str, float]] = {
     },
 }
 
-HORIZON_WEIGHTS = {1: 0.50, 3: 0.30, 7: 0.20}
-MIN_OPPORTUNITY_FIT = 60
-EXCLUDED_OPPORTUNITY_TAGS = {"成熟头部产品", "平台或网络效应较强", "存在品牌/IP 风险"}
+HORIZON_WEIGHTS = {1: 0.35, 3: 0.25, 7: 0.20, 14: 0.12, 30: 0.08}
+MIN_OPPORTUNITY_FIT = {"app": 72, "mobile_game": 72, "steam_game": 70}
+EXCLUDED_OPPORTUNITY_TAGS = {
+    "成熟头部产品",
+    "平台或网络效应较强",
+    "存在品牌/IP 风险",
+    "政府或机构专属",
+    "高合规风险",
+    "博彩或真钱风险",
+    "大型制作规模",
+    "续作或成熟 IP",
+}
+
+PUBLIC_SECTOR_TERMS = {
+    "government", "ministry", "federal agency", "public authority", "bundesagentur",
+    "arbeitsagentur", "gov.uk", "gov.br", "gov.cn", "고용24", "한국고용정보원",
+    "政务", "政府", "公共就业", "公共服務", "公共服务",
+}
+REGULATED_TERMS = {
+    "banking", "bank account", "insurance", "broker", "trading", "crypto wallet",
+    "medical diagnosis", "patient portal", "identity verification", "authentication",
+    "vpn", "proxy", "secure access",
+}
+GAMBLING_TERMS = {
+    "casino", "slots", "sportsbook", "betting", "real cash", "win cash", "poker money",
+}
+KNOWN_IP_REFERENCE_TERMS = {
+    "sensi ff", "free fire", "pokemon", "marvel", "star wars", "harry potter",
+    "lord of the rings", "game of thrones",
+    "microsoft flight simulator",
+}
+
+# Stable tag ids emitted by Steam's own search result rows. Only use tags with
+# clear production/distribution implications; unknown ids remain neutral.
+STEAM_OPEN_WORLD_TAGS = {"1695", "128"}  # Open World, Massively Multiplayer
+STEAM_LIVE_SERVICE_TAGS = {"113", "19", "21", "122", "4085", "1646"}
+STEAM_NETWORK_TAGS = {"3859", "1685", "3843", "1775", "128"}
+STEAM_LIGHTWEIGHT_TAGS = {"492", "597", "599", "1664"}  # Indie, Casual, Simulation, Puzzle
 
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -138,10 +175,34 @@ def _validation_window(candidate: Candidate) -> float:
     return _clamp(1 - abs(log_reviews - center) / radius, 0.03, 1.0)
 
 
-def _implementation_feasibility(candidate: Candidate) -> tuple[float, list[str]]:
+def _searchable_text(candidate: Candidate) -> str:
+    values: list[object] = [
+        candidate.name,
+        candidate.developer,
+        candidate.metadata.get("genre", ""),
+        candidate.metadata.get("description", ""),
+        candidate.metadata.get("publisher", ""),
+    ]
+    raw_genres = candidate.metadata.get("genres", [])
+    if isinstance(raw_genres, list):
+        values.extend(raw_genres)
+    return " ".join(str(value).casefold() for value in values if value)
+
+
+def _steam_tag_ids(candidate: Candidate) -> set[str]:
+    raw = str(candidate.metadata.get("steam_tag_ids", ""))
+    return set(re.findall(r"\d+", raw))
+
+
+def _implementation_feasibility(
+    candidate: Candidate,
+) -> tuple[float, list[str], list[str]]:
     genres = _genres(candidate)
+    steam_tags = _steam_tag_ids(candidate)
     name = candidate.name.casefold()
+    text = _searchable_text(candidate)
     tags: list[str] = []
+    risks: list[str] = []
     if candidate.segment == "app":
         primary = str(candidate.metadata.get("genre", "")).casefold()
         feasibility = APP_GENRE_FEASIBILITY.get(primary, 0.60)
@@ -156,14 +217,43 @@ def _implementation_feasibility(candidate: Candidate) -> tuple[float, list[str]]
         ):
             feasibility += 0.25
             tags.append("核心玩法易拆解")
+        elif candidate.segment == "steam_game" and steam_tags.intersection(
+            STEAM_LIGHTWEIGHT_TAGS
+        ):
+            feasibility += 0.12
+            tags.append("独立或轻量类型")
         if any(term in name for term in COMPLEX_GAME_TERMS) or genres.intersection(
             COMPLEX_GAME_GENRES
         ):
-            feasibility -= 0.20
+            feasibility -= 0.25
             tags.append("内容或系统量较大")
-        if "™" in candidate.name or "®" in candidate.name:
-            feasibility -= 0.30
-            tags.append("存在品牌/IP 风险")
+            if candidate.segment == "steam_game":
+                risks.append("大型制作规模")
+        if candidate.segment == "steam_game":
+            if steam_tags.intersection(STEAM_OPEN_WORLD_TAGS):
+                feasibility -= 0.35
+                risks.append("大型制作规模")
+            if len(steam_tags.intersection(STEAM_LIVE_SERVICE_TAGS)) >= 4:
+                feasibility -= 0.28
+                risks.append("大型制作规模")
+            if len(steam_tags.intersection(STEAM_NETWORK_TAGS)) >= 2:
+                feasibility -= 0.25
+                risks.append("平台或网络效应较强")
+            if "113" in steam_tags and steam_tags.intersection(STEAM_NETWORK_TAGS):
+                feasibility -= 0.20
+                risks.append("平台或网络效应较强")
+        sequel = re.search(r"(?:\b(?:ii|iii|iv)\b|(?:\s|:|-)[2-9])$", name)
+        is_simple_game = any(term in name for term in SIMPLE_GAME_TERMS) or bool(
+            genres.intersection(SIMPLE_GAME_GENRES)
+        )
+        if candidate.segment == "steam_game" and sequel and not is_simple_game:
+            feasibility -= 0.18
+            risks.append("续作或成熟 IP")
+    if "™" in candidate.name or "®" in candidate.name or any(
+        term in text for term in KNOWN_IP_REFERENCE_TERMS
+    ):
+        feasibility -= 0.30
+        risks.append("存在品牌/IP 风险")
 
     file_size = candidate.metadata.get("file_size_bytes")
     try:
@@ -176,7 +266,9 @@ def _implementation_feasibility(candidate: Candidate) -> tuple[float, list[str]]
     elif file_size_bytes >= 1_500_000_000:
         feasibility -= 0.12
         tags.append("资源体量较重")
-    return _clamp(feasibility), tags
+        if candidate.segment != "app":
+            risks.append("大型制作规模")
+    return _clamp(feasibility), tags, risks
 
 
 def _build_angle(candidate: Candidate) -> str:
@@ -203,26 +295,84 @@ def _build_angle(candidate: Candidate) -> str:
     return "先验证 5–10 分钟核心循环，再从题材、关卡和变现方式差异化"
 
 
+def _risk_dimensions(
+    candidate: Candidate,
+) -> tuple[float, float, float, list[str]]:
+    text = _searchable_text(candidate)
+    portability = _clamp(0.42 + min(candidate.market_count, 3) * 0.18)
+    if candidate.segment == "app":
+        primary = str(candidate.metadata.get("genre", "")).casefold()
+        distribution = APP_GENRE_FEASIBILITY.get(primary, 0.60)
+    else:
+        distribution = 0.72 if candidate.segment == "mobile_game" else 0.62
+    legal_safety = 1.0
+    risks: list[str] = []
+    if any(term in text for term in PUBLIC_SECTOR_TERMS):
+        portability, distribution, legal_safety = 0.08, 0.12, 0.45
+        risks.append("政府或机构专属")
+    if any(term in text for term in GAMBLING_TERMS):
+        distribution, legal_safety = min(distribution, 0.20), 0.05
+        risks.append("博彩或真钱风险")
+    if any(term in text for term in REGULATED_TERMS):
+        portability = min(portability, 0.45)
+        distribution, legal_safety = min(distribution, 0.38), min(legal_safety, 0.35)
+        risks.append("高合规风险")
+    if any(term in text for term in KNOWN_IP_REFERENCE_TERMS) or "™" in candidate.name or "®" in candidate.name:
+        portability, legal_safety = min(portability, 0.35), 0.08
+        risks.append("存在品牌/IP 风险")
+    return portability, _clamp(distribution), legal_safety, risks
+
+
 def _opportunity_fit(candidate: Candidate, today: date) -> tuple[float, list[str]]:
-    feasibility, tags = _implementation_feasibility(candidate)
+    feasibility, tags, implementation_risks = _implementation_feasibility(candidate)
     validation = _validation_window(candidate)
-    fit = 0.65 * feasibility + 0.35 * validation
+    portability, distribution, legal_safety, risks = _risk_dimensions(candidate)
+    risks = list(dict.fromkeys(implementation_risks + risks))
+    fit = (
+        0.30 * feasibility
+        + 0.25 * validation
+        + 0.20 * portability
+        + 0.15 * distribution
+        + 0.10 * legal_safety
+    )
 
     age_days = (today - candidate.release_date).days if candidate.release_date else None
+    if (
+        candidate.segment == "steam_game"
+        and age_days is not None
+        and age_days > 1_825
+        and _steam_tag_ids(candidate).intersection(STEAM_NETWORK_TAGS)
+    ):
+        fit *= 0.55
+        risks.append("平台或网络效应较强")
     if age_days is not None and age_days > 1_095 and candidate.review_count > 250_000:
         fit *= 0.12
-        tags.append("成熟头部产品")
+        risks.append("成熟头部产品")
     elif candidate.review_count >= 500_000:
         fit *= 0.40
         tags.append("竞争门槛较高")
     elif 50 <= candidate.review_count <= 50_000:
         tags.append("需求已有初步验证")
 
-    if fit >= 0.72:
+    risks = list(dict.fromkeys(risks))
+    if fit >= 0.72 and not set(risks).intersection(EXCLUDED_OPPORTUNITY_TAGS):
         tags.insert(0, "小团队可切入")
+    dimensions = {
+        "需求验证": round(validation * 100),
+        "开发可行": round(feasibility * 100),
+        "跨市场可迁移": round(portability * 100),
+        "分发可达": round(distribution * 100),
+        "法律与合规安全": round(legal_safety * 100),
+    }
     candidate.metadata["opportunity_fit"] = round(_clamp(fit) * 100)
-    candidate.metadata["opportunity_tags"] = list(dict.fromkeys(tags))[:3]
-    candidate.metadata["build_angle"] = _build_angle(candidate)
+    candidate.metadata["opportunity_tags"] = list(dict.fromkeys(tags + risks))[:5]
+    candidate.metadata["opportunity_risks"] = risks
+    candidate.metadata["opportunity_dimensions"] = dimensions
+    card = build_opportunity_card(candidate)
+    candidate.metadata["opportunity_theme_key"] = card["theme_key"]
+    candidate.metadata["opportunity_theme"] = card["theme"]
+    candidate.metadata["opportunity_card"] = card
+    candidate.metadata["build_angle"] = card["differentiation"]
     return _clamp(fit), candidate.metadata["opportunity_tags"]
 
 
@@ -334,9 +484,13 @@ def _raw_score(
     reasons: list[str] = []
     best_rank_change: tuple[float, int] | None = None
     best_review_change: tuple[int, int] | None = None
+    seen_horizons: set[int] = set()
+    positive_horizons: set[int] = set()
 
     for horizon, snapshot in history.items():
         previous = snapshot.observations.get(candidate.key)
+        if previous is not None:
+            seen_horizons.add(horizon)
         rank_velocity, total_rank_delta = _paired_rank_velocity(
             candidate, previous, snapshot, current_healthy
         )
@@ -347,6 +501,8 @@ def _raw_score(
                 best_rank_change is None or total_rank_delta > best_rank_change[0]
             ):
                 best_rank_change = (total_rank_delta, snapshot.actual_days)
+            if previous is not None and total_rank_delta >= 3:
+                positive_horizons.add(horizon)
         review_signal, review_delta = _paired_review_velocity(
             candidate, previous, snapshot, current_healthy
         )
@@ -356,6 +512,10 @@ def _raw_score(
                 best_review_change is None or review_delta > best_review_change[0]
             ):
                 best_review_change = (review_delta, snapshot.actual_days)
+            if previous is not None and review_delta >= max(
+                5, round(previous.review_count * 0.01)
+            ):
+                positive_horizons.add(horizon)
 
     rank_signal = _weighted(rank_values)
     review_signal = _weighted(review_values)
@@ -376,6 +536,21 @@ def _raw_score(
         reasons.append(
             f"{best_review_change[1]} 日新增 {best_review_change[0]:,} 条可比评价"
         )
+    confidence = _clamp(
+        0.40 * min(len(seen_horizons) / 2, 1)
+        + 0.35 * min(len(positive_horizons) / 2, 1)
+        + 0.25 * min(candidate.market_count / 3, 1)
+    )
+    confidence_score = round(confidence * 100)
+    candidate.metadata["history_horizons"] = sorted(seen_horizons)
+    candidate.metadata["growth_horizons"] = sorted(positive_horizons)
+    candidate.metadata["confidence_score"] = confidence_score
+    candidate.metadata["confidence_label"] = (
+        "高置信" if confidence_score >= 75 else "已确认" if confidence_score >= 50 else "待观察"
+    )
+    candidate.metadata["opportunity_tier"] = (
+        "validated" if seen_horizons and confidence_score >= 50 else "watch"
+    )
     opportunity, opportunity_tags = _opportunity_fit(candidate, today)
     if opportunity_tags:
         reasons.append(
@@ -386,9 +561,16 @@ def _raw_score(
     elif all(snapshot.observations.get(candidate.key) is None for snapshot in history.values()):
         reasons.append("新进入监控榜单")
 
-    discussion = _clamp(math.log1p(candidate.social_mentions) / math.log(6))
-    if candidate.social_mentions:
-        reasons.append(f"近 48 小时 HN 精确提及 {candidate.social_mentions} 次")
+    exact_mentions = int(candidate.metadata.get("hn_exact_mentions", 0))
+    topic_mentions = int(candidate.metadata.get("hn_topic_mentions", 0))
+    exact_signal = _clamp(math.log1p(exact_mentions) / math.log(6))
+    topic_signal = 0.70 * _clamp(math.log1p(topic_mentions) / math.log(31))
+    discussion = max(exact_signal, topic_signal)
+    if exact_mentions:
+        reasons.append(f"近 48 小时 HN 精确提及 {exact_mentions} 次")
+    elif topic_mentions:
+        topic = str(candidate.metadata.get("hn_trend_topic", "相关主题"))
+        reasons.append(f"HN 主题「{topic}」近 48 小时 {topic_mentions} 条讨论")
 
     source_markets = {market for source, market in current_healthy if source == candidate.source}
     ranked_healthy_markets = {
@@ -482,6 +664,14 @@ def score_all(
                 signal: round(normalized_by_signal[signal][index] * weight, 2)
                 for signal, weight in weights.items()
             }
+            base_score = round(sum(components.values()), 2)
+            opportunity_fit = int(item.candidate.metadata.get("opportunity_fit", 0)) / 100
+            actionability_multiplier = 0.45 + 0.55 * opportunity_fit
+            final_score = round(base_score * actionability_multiplier, 2)
+            item.candidate.metadata["base_momentum_score"] = base_score
+            item.candidate.metadata["actionability_multiplier"] = round(
+                actionability_multiplier, 3
+            )
             reasons = list(dict.fromkeys(item.reasons))
             if len(reasons) < 2:
                 reasons.append(f"当前最佳榜位 #{item.candidate.best_rank}")
@@ -490,7 +680,7 @@ def score_all(
             scored.append(
                 ScoredCandidate(
                     candidate=item.candidate,
-                    score=round(sum(components.values()), 2),
+                    score=final_score,
                     components=components,
                     component_weights=weights,
                     reasons=tuple(reasons[:3]),
@@ -506,12 +696,23 @@ def select_segment_items(
     def actionable(item: ScoredCandidate) -> bool:
         fit = int(item.candidate.metadata.get("opportunity_fit", 0))
         tags = set(item.candidate.metadata.get("opportunity_tags", []))
-        return fit >= MIN_OPPORTUNITY_FIT and not tags.intersection(EXCLUDED_OPPORTUNITY_TAGS)
+        risks = set(item.candidate.metadata.get("opportunity_risks", []))
+        threshold = MIN_OPPORTUNITY_FIT[item.candidate.segment]
+        return fit >= threshold and not (tags | risks).intersection(EXCLUDED_OPPORTUNITY_TAGS)
 
-    return {
-        segment: [
+    selected: dict[str, list[ScoredCandidate]] = {}
+    for segment, count in segment_counts.items():
+        eligible = [
             item for item in scored
             if item.candidate.segment == segment and actionable(item)
-        ][:count]
-        for segment, count in segment_counts.items()
-    }
+        ]
+        eligible.sort(
+            key=lambda item: (
+                item.candidate.metadata.get("opportunity_tier") == "validated",
+                item.score,
+                int(item.candidate.metadata.get("confidence_score", 0)),
+            ),
+            reverse=True,
+        )
+        selected[segment] = eligible[:count]
+    return selected

@@ -124,6 +124,69 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("safe", ids)
         self.assertNotIn("risky", ids)
 
+    def test_confirmed_growth_is_ranked_before_new_watch_item(self) -> None:
+        confirmed = make_candidate("confirmed", rank=5, reviews=900)
+        newcomer = make_candidate("newcomer", rank=1, reviews=1500)
+        previous = PreviousObservation(
+            captured_at=datetime(2026, 8, 18, tzinfo=timezone.utc),
+            run_day=date(2026, 8, 18),
+            average_rank=35,
+            best_rank=30,
+            review_count=600,
+            market_count=3,
+            social_mentions=0,
+            ranks={"us:top": 30, "jp:top": 35, "de:top": 40},
+            review_counts={"us": 600},
+        )
+        snapshot = HistorySnapshot(
+            run_id=2,
+            run_day=date(2026, 8, 18),
+            captured_at=previous.captured_at,
+            actual_days=1,
+            observations={confirmed.key: previous},
+            healthy_markets=frozenset({("apple", "us"), ("apple", "jp"), ("apple", "de")}),
+        )
+        scored = score_all(
+            [confirmed, newcomer], {1: snapshot}, statuses(), date(2026, 8, 19)
+        )
+        selected = select_segment_items(
+            scored, {"app": 2, "mobile_game": 1, "steam_game": 1}
+        )["app"]
+        self.assertEqual(selected[0].candidate.external_id, "confirmed")
+        self.assertEqual(confirmed.metadata["opportunity_tier"], "validated")
+        self.assertEqual(newcomer.metadata["opportunity_tier"], "watch")
+        self.assertIn("mvp_scope", confirmed.metadata["opportunity_card"])
+
+    def test_public_sector_proxy_and_large_sequel_are_hard_excluded(self) -> None:
+        safe_app = make_candidate("safe-app", rank=8, reviews=1200)
+        government = make_candidate("government", rank=1, reviews=1800)
+        government.developer = "Bundesagentur fuer Arbeit"
+        proxy = make_candidate("proxy", rank=2, reviews=1600)
+        proxy.name = "Rule Based Proxy"
+        sequel = make_candidate("sequel", segment="steam_game", rank=1, reviews=500)
+        sequel.name = "The Heavy Adventure 2"
+        sequel.metadata = {"genre": "Adventure"}
+        live_service = make_candidate("live-service", segment="steam_game", rank=2, reviews=700)
+        live_service.name = "Anime Action Online"
+        live_service.metadata = {"steam_tag_ids": "[113,19,122,4085]"}
+        safe_game = make_candidate("safe-game", segment="steam_game", rank=10, reviews=500)
+        safe_game.name = "Tiny Repair Simulator"
+        scored = score_all(
+            [safe_app, government, proxy, sequel, live_service, safe_game],
+            {}, statuses(), date(2026, 8, 19)
+        )
+        sections = select_segment_items(
+            scored, {"app": 3, "mobile_game": 1, "steam_game": 3}
+        )
+        app_ids = {item.candidate.external_id for item in sections["app"]}
+        steam_ids = {item.candidate.external_id for item in sections["steam_game"]}
+        self.assertEqual(app_ids, {"safe-app"})
+        self.assertEqual(steam_ids, {"safe-game"})
+        self.assertIn("政府或机构专属", government.metadata["opportunity_risks"])
+        self.assertIn("高合规风险", proxy.metadata["opportunity_risks"])
+        self.assertIn("大型制作规模", sequel.metadata["opportunity_risks"])
+        self.assertIn("大型制作规模", live_service.metadata["opportunity_risks"])
+
 
 if __name__ == "__main__":
     unittest.main()

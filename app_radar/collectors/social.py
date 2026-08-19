@@ -11,6 +11,16 @@ from ..models import Candidate, SourceStatus
 
 HN_SEARCH_URL = "https://hn.algolia.com/api/v1/search_by_date"
 
+HN_TOPICS: dict[str, tuple[str, ...]] = {
+    "AI 与自动化": (" ai ", " llm ", "agent", "automation", "chatbot"),
+    "效率与工作流": ("productivity", "workflow", "task manager", "calendar", "notes app"),
+    "隐私与安全": ("privacy", "security", "encryption", "authentication", "password"),
+    "图片与视频": ("camera", "photo", "image", "video", "creator tool"),
+    "学习与教育": ("education", "learning", "study", "language learning", "course"),
+    "开发者工具": ("developer tool", "devtool", "api client", "terminal", "code editor"),
+    "个人财务": ("personal finance", "budgeting", "expense", "invoice", "accounting"),
+}
+
 
 def _normalize(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
@@ -36,6 +46,31 @@ def _eligible_for_discussion_signal(candidate: Candidate, today: datetime) -> bo
         return candidate.review_count < 250_000
     age_days = (today.date() - candidate.release_date).days
     return age_days <= 730 or candidate.review_count < 250_000
+
+
+def _candidate_topic(candidate: Candidate) -> str | None:
+    values: list[object] = [
+        candidate.name,
+        candidate.metadata.get("genre", ""),
+        candidate.metadata.get("description", ""),
+    ]
+    genres = candidate.metadata.get("genres", [])
+    if isinstance(genres, list):
+        values.extend(genres)
+    text = f" {_normalize(' '.join(str(value) for value in values if value))} "
+    topic_signals = {
+        "AI 与自动化": (" ai ", " llm ", "agent", "automation", "chatbot"),
+        "效率与工作流": ("productivity", "business", "workflow", "task", "calendar", "notes"),
+        "隐私与安全": ("privacy", "security", "encrypt", "password", "authenticator"),
+        "图片与视频": ("photo", "video", "camera", "image", "graphics design"),
+        "学习与教育": ("education", "reference", "learn", "study", "exam", "language"),
+        "开发者工具": ("developer", "terminal", "api", "code", "debug"),
+        "个人财务": ("finance", "budget", "expense", "invoice", "accounting"),
+    }
+    for topic, terms in topic_signals.items():
+        if any(term in text for term in terms):
+            return topic
+    return None
 
 
 def apply_hacker_news_mentions(
@@ -74,21 +109,37 @@ def apply_hacker_news_mentions(
         for hit in hits
     ]
     now = datetime.now(timezone.utc)
+    topic_counts = {
+        topic: sum(
+            1 for title in normalized_titles if any(term in f" {title} " for term in terms)
+        )
+        for topic, terms in HN_TOPICS.items()
+    }
+    exact_matched = 0
+    topic_matched = 0
     for candidate in candidates:
         if not _eligible_for_discussion_signal(candidate, now):
             candidate.social_mentions = 0
             continue
         phrases = _candidate_phrases(candidate.name)
-        if not phrases:
-            continue
-        candidate.social_mentions = sum(
+        exact_mentions = sum(
             1
             for title in normalized_titles
             if any(f" {phrase} " in f" {title} " for phrase in phrases)
-        )
-    matched = sum(1 for candidate in candidates if candidate.social_mentions)
+        ) if phrases else 0
+        topic = _candidate_topic(candidate) if candidate.segment == "app" else None
+        topic_mentions = topic_counts.get(topic, 0) if topic else 0
+        candidate.metadata["hn_exact_mentions"] = exact_mentions
+        candidate.metadata["hn_trend_topic"] = topic or ""
+        candidate.metadata["hn_topic_mentions"] = topic_mentions
+        candidate.social_mentions = exact_mentions * 5 + min(topic_mentions, 20)
+        exact_matched += exact_mentions > 0
+        topic_matched += topic_mentions > 0
     state = "degraded" if error else "healthy"
-    detail = f"matched {matched} monitored products"
+    detail = (
+        f"matched {exact_matched} exact products; "
+        f"applied category trends to {topic_matched} candidates"
+    )
     if error:
         detail += f"; pagination stopped: {error}"
     return SourceStatus("Hacker News", len(hits), state, detail)

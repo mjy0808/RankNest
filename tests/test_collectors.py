@@ -6,7 +6,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from app_radar.collectors.apple import enrich_with_lookup, parse_feed, parse_mobile_game_feed
-from app_radar.collectors.social import _eligible_for_discussion_signal
+from app_radar.collectors.social import (
+    _eligible_for_discussion_signal,
+    apply_hacker_news_mentions,
+)
 from app_radar.collectors.steam import parse_search_payload
 from app_radar.models import Candidate
 
@@ -31,6 +34,7 @@ class AppleCollectorTests(unittest.TestCase):
                     "releaseDate": "2026-08-01T00:00:00Z",
                     "currentVersionReleaseDate": "2026-08-10T00:00:00Z",
                     "formattedPrice": "Free",
+                    "description": "A focused workflow tool for small teams.",
                 }
             ],
             "us",
@@ -40,6 +44,7 @@ class AppleCollectorTests(unittest.TestCase):
         self.assertEqual(candidate.developer, "Tiny Studio LLC")
         self.assertEqual(candidate.review_count, 321)
         self.assertAlmostEqual(candidate.rating, 4.8)
+        self.assertIn("workflow", candidate.metadata["description"])
 
     def test_legacy_game_feed_creates_mobile_game_candidate(self) -> None:
         payload = json.loads(
@@ -89,6 +94,30 @@ class SocialCollectorTests(unittest.TestCase):
         )
         now = datetime(2026, 8, 11, tzinfo=timezone.utc)
         self.assertTrue(_eligible_for_discussion_signal(candidate, now))
+
+    def test_category_trend_is_applied_when_exact_name_is_absent(self) -> None:
+        class FakeClient:
+            def get_json(self, _url: str) -> dict[str, object]:
+                return {
+                    "hits": [
+                        {"title": "AI agents are changing productivity workflows"},
+                        {"title": "A practical guide to workflow automation"},
+                    ],
+                    "nbPages": 1,
+                }
+
+        candidate = Candidate(
+            source="apple",
+            external_id="workflow",
+            name="Quiet Desk",
+            kind="app",
+            release_date=date(2026, 8, 1),
+            metadata={"genre": "Productivity"},
+        )
+        status = apply_hacker_news_mentions([candidate], FakeClient(), 48, 10)  # type: ignore[arg-type]
+        self.assertGreater(candidate.metadata["hn_topic_mentions"], 0)
+        self.assertGreater(candidate.social_mentions, 0)
+        self.assertIn("category trends", status.detail)
 
 
 if __name__ == "__main__":
