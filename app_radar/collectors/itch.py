@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from xml.etree import ElementTree
@@ -20,13 +21,21 @@ def feed_url(platform: str, chart: str) -> str:
     return f"https://itch.io/games/{prefix}platform-{platform}.xml"
 
 
+def _feed_date(value: str | None) -> date | None:
+    try:
+        return parsedate_to_datetime(value or "").date()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def parse_feed(text: str, platform: str, chart: str, limit: int) -> list[Candidate]:
     root = ElementTree.fromstring(text)
     if root.tag != "rss" or root.find("channel") is None:
         raise ValueError("itch.io returned an invalid RSS feed")
     candidates: list[Candidate] = []
     for rank, item in enumerate(root.findall("./channel/item")[:limit], start=1):
-        name = (item.findtext("title") or "").strip()
+        full_title = (item.findtext("title") or "").strip()
+        name = (item.findtext("plainTitle") or re.sub(r"(?:\s+\[[^\]]+\])+$", "", full_title)).strip()
         url = (item.findtext("link") or "").strip().split("?", 1)[0].rstrip("/")
         parsed = urlparse(url)
         if not name or parsed.scheme != "https" or not (parsed.hostname or "").endswith(".itch.io"):
@@ -34,25 +43,27 @@ def parse_feed(text: str, platform: str, chart: str, limit: int) -> list[Candida
         description_html = item.findtext("description") or ""
         image = re.search(r'<img[^>]+src=[\"\x27]([^\"\x27]+)', description_html, re.I)
         description = " ".join(html.unescape(re.sub(r"<[^>]*>", " ", description_html)).split())
-        published = None
-        try:
-            published = parsedate_to_datetime(item.findtext("pubDate") or "").date()
-        except (TypeError, ValueError, OverflowError):
-            pass
+        created = _feed_date(item.findtext("createDate"))
+        updated = _feed_date(item.findtext("updateDate") or item.findtext("pubDate"))
         categories = [value.text for value in item.findall("category") if value.text]
+        categories.extend(
+            value for value in re.findall(r"\[([^\]]+)\]", full_title)
+            if value.casefold() not in {"free", "paid", "windows", "linux", "macos", "osx", "html5", "web"}
+            and not value.startswith("$")
+        )
         developer = item.findtext("{http://purl.org/dc/elements/1.1/}creator") or parsed.hostname.split(".")[0]
         candidates.append(Candidate(
             source="itch", external_id=url, name=html.unescape(name), kind="game",
             developer=developer, url=url,
-            image_url=html.unescape(image.group(1)) if image else "",
-            update_date=published,
+            image_url=html.unescape(item.findtext("imageurl") or (image.group(1) if image else "")),
+            release_date=created, update_date=updated, price_text=item.findtext("price") or "",
             ranks={f"global:{platform}-{chart}": rank},
             metadata={
                 "description": description[:1000], "genres": categories,
                 "platforms": [PLATFORM_LABELS[platform]],
                 "discovery_charts": [chart], "rank_limit": limit,
-                "review_count_unavailable": True, "release_date_unavailable": True,
-                "source_note": "itch.io 热榜；RSS 未提供评分、评价量和原始上线日期",
+                "review_count_unavailable": True, "release_date_unavailable": created is None,
+                "source_note": "itch.io 热榜；RSS 未提供评分和评价量，创建日期可用时作为上线参考",
             },
         ))
     return candidates

@@ -21,6 +21,7 @@ class ItchTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         candidate = items[0]
         self.assertEqual(candidate.segment, "non_mobile_game")
+        self.assertEqual(candidate.name, "Tiny Repair Workshop")
         self.assertEqual(candidate.metadata["platforms"], ["Web"])
         self.assertEqual(candidate.developer, "Tiny Studio")
         self.assertIsNone(candidate.release_date)
@@ -33,11 +34,22 @@ class ItchTests(unittest.TestCase):
         self.assertIsNone(payload["competition_score"])
         self.assertEqual(payload["competition_level"], "竞争待核实")
 
+    def test_original_creation_date_is_distinct_from_recent_update(self) -> None:
+        feed = FEED.replace("<pubDate>", "<createDate>Sun, 01 Feb 2026 10:00:00 GMT</createDate><pubDate>")
+        candidate = parse_feed(feed, "web", "new-and-popular", 30)[0]
+        self.assertEqual(candidate.release_date, date(2026, 2, 1))
+        self.assertEqual(candidate.update_date, date(2026, 10, 22))
+
+    def test_known_franchise_cannot_enter_non_mobile_rankings(self) -> None:
+        games = [Candidate("steam", name, name, "game") for name in (
+            "FINAL FANTASY RESONANCE", "ONE PIECE: Grand Gourmet"
+        )]
+        scored = score_all(games, {}, [SourceStatus("Steam/US", 100)], date(2026, 10, 23))
+        self.assertEqual(select_segment_items(scored, {"non_mobile_game": 6})["non_mobile_game"], [])
+
     def test_same_game_merges_platforms_and_one_feed_failure_is_degraded(self) -> None:
         client = Mock()
-        client.get_text.side_effect = lambda url: (
-            FEED if "platform-web" in url else FEED
-        )
+        client.get_text.return_value = FEED
         config = ItchConfig(platforms=("web", "windows"), charts=("popular",), limit=1)
         candidates, statuses = collect_itch(config, client)
         self.assertEqual(len(candidates), 1)

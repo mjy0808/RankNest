@@ -83,6 +83,7 @@ KNOWN_IP_REFERENCE_TERMS = {
     "sensi ff", "free fire", "pokemon", "marvel", "star wars", "harry potter",
     "lord of the rings", "game of thrones",
     "microsoft flight simulator",
+    "final fantasy", "one piece", "kirby", "warhammer", "godzilla",
 }
 MAJOR_GAME_PUBLISHER_TERMS = {
     "activision", "bandai namco", "blizzard", "capcom", "electronic arts",
