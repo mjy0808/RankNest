@@ -11,6 +11,46 @@ from .models import ScoredCandidate, SourceStatus
 from .scoring import SEGMENT_LABELS
 
 
+TAB_SCRIPT = """
+(() => {
+  const menu = document.querySelector('[data-ranking-tabs]');
+  if (!menu) return;
+  const tabs = Array.from(menu.querySelectorAll('[role="tab"]'));
+  if (!tabs.length) return;
+  const panels = tabs.map(tab => document.getElementById(tab.getAttribute('aria-controls')));
+  const activate = (tab, updateUrl = false) => {
+    tabs.forEach((item, index) => {
+      const selected = item === tab;
+      item.setAttribute('aria-selected', String(selected));
+      item.tabIndex = selected ? 0 : -1;
+      panels[index].hidden = !selected;
+    });
+    if (updateUrl) {
+      try { history.replaceState(null, '', '#' + tab.dataset.segment); } catch (_) {}
+    }
+  };
+  const fromHash = () => tabs.find(tab => '#' + tab.dataset.segment === location.hash);
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => activate(tab, true));
+    tab.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = tabs.length - 1;
+      if (next === undefined) return;
+      event.preventDefault();
+      activate(tabs[next], true);
+      tabs[next].focus();
+    });
+  });
+  window.addEventListener('hashchange', () => activate(fromHash() || tabs[0]));
+  activate(fromHash() || tabs[0]);
+  menu.hidden = false;
+})();
+"""
+
+
 @dataclass(frozen=True)
 class ReportArtifacts:
     dated_html: Path
@@ -31,7 +71,7 @@ def _compact_number(value: int) -> str:
 
 
 def _source_label(source: str) -> str:
-    return {"apple": "App Store", "steam": "Steam"}.get(source, source.title())
+    return {"apple": "App Store", "steam": "Steam", "itch": "itch.io"}.get(source, source.title())
 
 
 def _rank_change(rank: int, item: ScoredCandidate) -> int | None:
@@ -56,8 +96,10 @@ def _item_dict(rank: int, item: ScoredCandidate) -> dict[str, Any]:
         "image_url": candidate.image_url,
         "release_date": candidate.release_date.isoformat() if candidate.release_date else None,
         "update_date": candidate.update_date.isoformat() if candidate.update_date else None,
-        "rating": round(candidate.rating, 2),
-        "review_count": candidate.review_count,
+        "rating": round(candidate.rating, 2) if candidate.ratings else None,
+        "review_count": None if candidate.metadata.get("review_count_unavailable") else candidate.review_count,
+        "platforms": list(candidate.metadata.get("platforms", [])),
+        "source_note": str(candidate.metadata.get("source_note", "")),
         "market_count": candidate.market_count,
         "best_rank": candidate.best_rank,
         "average_rank": round(candidate.average_rank, 2),
@@ -85,7 +127,7 @@ def _item_dict(rank: int, item: ScoredCandidate) -> dict[str, Any]:
         "early_candidate": bool(candidate.metadata.get("early_candidate", False)),
         "early_signal_score": int(candidate.metadata.get("early_signal_score", 0)),
         "early_reasons": list(candidate.metadata.get("early_reasons", [])),
-        "competition_score": int(candidate.metadata.get("competition_score", 0)),
+        "competition_score": None if candidate.metadata.get("review_count_unavailable") else int(candidate.metadata.get("competition_score", 0)),
         "competition_level": str(candidate.metadata.get("competition_level", "")),
         "theme_mature_competitors": int(
             candidate.metadata.get("theme_mature_competitors", 0)
@@ -112,11 +154,18 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
     source_label = _source_label(candidate.source)
     reasons = "".join(f"<li>{html.escape(reason)}</li>" for reason in item.reasons)
     markets = " · ".join(sorted({key.split(":", 1)[0].upper() for key in candidate.ranks}))
+    if candidate.source == "itch":
+        markets = "全球榜 · " + " / ".join(candidate.metadata.get("platforms", []))
+    rating_label = f"{candidate.rating:.1f}" if candidate.ratings else "未提供"
+    reviews_label = (
+        "未提供" if candidate.metadata.get("review_count_unavailable")
+        else _compact_number(candidate.review_count)
+    )
     metrics = (
         f"最佳榜位 <strong>#{candidate.best_rank}</strong>"
         f"　覆盖 <strong>{candidate.market_count}</strong> 市场"
-        f"　评分 <strong>{candidate.rating:.1f}</strong>"
-        f"　评价 <strong>{_compact_number(candidate.review_count)}</strong>"
+        f"　评分 <strong>{rating_label}</strong>"
+        f"　评价 <strong>{reviews_label}</strong>"
     )
     component_rows = "".join(
         f"""
@@ -165,6 +214,10 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
         str(candidate.metadata.get("competition_level", "未知竞争"))
     )
     competition_score = int(candidate.metadata.get("competition_score", 0))
+    competition_detail = (
+        competition_level if candidate.metadata.get("review_count_unavailable")
+        else f"{competition_level} {competition_score}"
+    )
     if early_candidate:
         tier_class = "early"
         tier_label = f"早期苗头 · 早期 {early_score}"
@@ -179,9 +232,9 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
     )
     early_html = (
         f'<div class="early-metrics"><strong>早期信号 {early_score}</strong>'
-        f'<span>{competition_level} {competition_score}</span></div>'
+        f'<span>{competition_detail}</span></div>'
         if early_candidate
-        else f'<div class="early-metrics muted"><span>{competition_level} {competition_score}</span></div>'
+        else f'<div class="early-metrics muted"><span>{competition_detail}</span></div>'
     )
     opportunity_card = candidate.metadata.get("opportunity_card", {})
     if not isinstance(opportunity_card, dict):
@@ -290,7 +343,15 @@ def render_html(
     )
     watch_count = total_selected - validated_count - early_count
     section_html = ""
-    for segment, items in sections.items():
+    tab_buttons: list[str] = []
+    for tab_index, (segment, items) in enumerate(sections.items()):
+        tab_buttons.append(
+            f'<button type="button" class="ranking-tab" id="tab-{segment}" '
+            f'role="tab" aria-controls="panel-{segment}" '
+            f'aria-selected="{"true" if tab_index == 0 else "false"}" '
+            f'tabindex="{0 if tab_index == 0 else -1}" data-segment="{segment}">'
+            f'{html.escape(SEGMENT_LABELS[segment])}<span>{len(items)}</span></button>'
+        )
         positioned = list(enumerate(items, start=1))
         early = [value for value in positioned if value[1].candidate.metadata.get("early_candidate")]
         validated = [
@@ -319,13 +380,17 @@ def render_html(
                 f'<div class="tier-title watch">新发现观察 <span>{len(watch)}</span></div>'
                 + "".join(_render_card(index, item) for index, item in watch)
             )
-        cards = "".join(groups)
+        cards = "".join(groups) or '<p class="empty-ranking">今天暂无符合筛选条件的候选。</p>'
         section_html += f"""
-        <section class="ranking">
+        <section class="ranking" id="panel-{segment}" role="tabpanel" aria-labelledby="tab-{segment}" tabindex="0">
           <div class="section-title"><span>{html.escape(SEGMENT_LABELS[segment])}</span><small>独立评分 · Top {len(items)}</small></div>
           {cards}
         </section>
         """
+    tabs_html = (
+        '<div class="ranking-tabs" role="tablist" aria-label="产品机会榜单" '
+        'data-ranking-tabs hidden>' + "".join(tab_buttons) + '</div>'
+    )
     themes_html = _render_themes(themes or [])
     backtest_html = _render_backtest(backtest or {})
     history_notice = ""
@@ -364,12 +429,13 @@ def render_html(
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · {generated_at:%Y-%m-%d}</title>
 <style>
-  *{{box-sizing:border-box}} body{{margin:0;background:#f3f5f7;color:#16202a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.55}}
+  *{{box-sizing:border-box}} [hidden]{{display:none!important}} body{{margin:0;background:#f3f5f7;color:#16202a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.55}}
   .wrap{{max-width:850px;margin:0 auto;padding:28px 16px 52px}} .hero{{background:linear-gradient(135deg,#0d1b2a,#173a44);color:#fff;border-radius:22px;padding:30px;box-shadow:0 16px 45px rgba(13,27,42,.18)}}
   .eyebrow{{color:#7ee0c3;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}} h1{{font-size:30px;line-height:1.2;margin:8px 0}} .sub{{color:#c7d6da;margin:0}} .trace{{color:#86a2aa;font-size:11px;margin-top:9px}}
   .summary{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:24px}} .summary div{{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px}} .summary strong{{display:block;font-size:22px}} .summary span{{font-size:12px;color:#bfd0d4}}
   .health{{font-size:12px;color:#bfd0d4;margin-top:12px}} .health b{{color:#7ee0c3}} .notice{{margin:16px 0;background:#fff6d9;color:#6d5312;border:1px solid #f1d987;border-radius:14px;padding:13px 16px}}
   .ranking,.themes,.validation{{margin-top:30px}} .section-title{{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid #173a44;margin:0 2px 12px;padding:0 2px 8px}} .section-title span{{font-size:23px;font-weight:900}} .section-title small{{color:#6d8088}}
+  .ranking-tabs{{display:flex;gap:8px;position:sticky;top:10px;z-index:10;margin-top:28px;padding:7px;background:#fff;border:1px solid #dce5e7;border-radius:16px;box-shadow:0 5px 18px rgba(25,45,55,.08);overflow-x:auto}} .ranking-tab{{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;min-width:max-content;border:0;border-radius:11px;padding:12px 18px;background:transparent;color:#51656d;font:inherit;font-weight:800;font-size:14px;cursor:pointer}} .ranking-tab span{{padding:1px 7px;border-radius:99px;background:#eaf0f2;font-size:11px}} .ranking-tab[aria-selected="true"]{{background:#173a44;color:#fff}} .ranking-tab[aria-selected="true"] span{{background:#31535b;color:#bdf4e3}} .ranking-tab:focus-visible,.ranking:focus-visible{{outline:3px solid #42b998;outline-offset:3px}} .ranking-tabs+.ranking{{margin-top:18px}} .empty-ranking{{padding:24px;background:#fff;border-radius:14px;color:#718188}}
   .card{{position:relative;display:grid;grid-template-columns:34px 76px 1fr;gap:14px;margin:14px 0;background:#fff;border:1px solid #e3e8eb;border-radius:18px;padding:18px;box-shadow:0 8px 24px rgba(25,45,55,.05)}}
   .nav{{display:flex;gap:10px;margin-top:18px}} .nav a{{color:#d8fff3;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;text-decoration:none;font-size:12px;font-weight:700}}
   .rank{{font-weight:900;font-size:18px;color:#9ba9af;padding-top:4px}} .icon{{position:relative;border-radius:16px;width:72px;height:72px;background:linear-gradient(145deg,#e5f2ee,#dce5ea);display:flex;align-items:center;justify-content:center;color:#2e7462;font-size:24px;font-weight:900;overflow:hidden}} .icon img{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#eef3f3}}
@@ -388,12 +454,12 @@ def render_html(
     <div class="health"><b>{early_count} 个早期苗头</b> · {validated_count} 个已验证机会 · {watch_count} 个普通观察　|　{healthy} 个健康数据源 · {degraded} 降级 · {failed} 失败</div>
     <nav class="nav">{navigation}</nav>
   </header>
-  {history_notice}{backtest_html}{themes_html}{section_html}{issues_html}
+  {history_notice}{backtest_html}{themes_html}{tabs_html}{section_html}{issues_html}
   <footer>
     <p><strong>筛选范围：</strong>从 {total_candidates:,} 个跨市场候选中按分榜选出 {total_selected} 个。</p>
     <p><strong>方法：</strong>每个分榜固定保留早期名额，综合上线/待上线时间、首次发现、低评价基数、短期抬升和多市场露头；同主题成熟竞品越多，竞争分越高并自动降权。其余候选继续使用 1/3/7/14/30 日增速、置信度和可借鉴性。政府专属、高合规、博彩、成熟 IP、强网络效应与大型制作产品使用硬门槛排除。只借鉴需求、机制和商业模式，不复制受保护内容。</p>
   </footer>
-</main></body></html>"""
+</main><script>{TAB_SCRIPT}</script></body></html>"""
 
 
 def render_text(
@@ -442,12 +508,14 @@ def render_text(
                 else "观察"
             )
             confidence = int(candidate.metadata.get("confidence_score", 0))
+            review_label = "未提供" if candidate.metadata.get("review_count_unavailable") else _compact_number(candidate.review_count)
+            rating_label = f"{candidate.rating:.1f}" if candidate.ratings else "未提供"
             lines.append(
                 f"{index:02d}. [{tier}·置信{confidence}] {candidate.name} — {item.score:.1f}/100"
             )
             lines.append(
                 f"    最佳 #{candidate.best_rank} · {candidate.market_count} 市场 · "
-                f"{candidate.rating:.1f} 分 · {_compact_number(candidate.review_count)} 评价"
+                f"{rating_label} 分 · {review_label} 评价"
             )
             lines.append(f"    {'；'.join(item.reasons)}")
             card = candidate.metadata.get("opportunity_card", {})
@@ -496,7 +564,7 @@ def write_report(
         for segment, items in sections.items()
     }
     payload = {
-        "schema_version": 5,
+        "schema_version": 6,
         "run_id": run_id,
         "data_fingerprint": fingerprint,
         "title": title,

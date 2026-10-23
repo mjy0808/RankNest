@@ -11,22 +11,22 @@ class ReportConfig:
     title: str = "全球高增长产品机会日报"
     app_count: int = 8
     mobile_game_count: int = 6
-    steam_game_count: int = 0
+    non_mobile_game_count: int = 6
     early_app_count: int = 2
     early_mobile_game_count: int = 2
-    early_steam_game_count: int = 0
+    early_non_mobile_game_count: int = 2
     timezone: str = "Asia/Shanghai"
 
     @property
     def top_count(self) -> int:
-        return self.app_count + self.mobile_game_count + self.steam_game_count
+        return self.app_count + self.mobile_game_count + self.non_mobile_game_count
 
     @property
     def segment_counts(self) -> dict[str, int]:
         values = {
             "app": self.app_count,
             "mobile_game": self.mobile_game_count,
-            "steam_game": self.steam_game_count,
+            "non_mobile_game": self.non_mobile_game_count,
         }
         return {segment: count for segment, count in values.items() if count > 0}
 
@@ -35,7 +35,7 @@ class ReportConfig:
         values = {
             "app": self.early_app_count,
             "mobile_game": self.early_mobile_game_count,
-            "steam_game": self.early_steam_game_count,
+            "non_mobile_game": self.early_non_mobile_game_count,
         }
         return {
             segment: count
@@ -58,11 +58,20 @@ class AppleConfig:
 
 @dataclass(frozen=True)
 class SteamConfig:
-    enabled: bool = False
+    enabled: bool = True
     markets: tuple[str, ...] = ("us", "gb", "de", "jp", "kr", "br")
     charts: tuple[str, ...] = ("topsellers", "popularnew", "popularcomingsoon")
     limit: int = 100
     workers: int = 4
+
+
+@dataclass(frozen=True)
+class ItchConfig:
+    enabled: bool = True
+    platforms: tuple[str, ...] = ("web", "windows", "osx", "linux")
+    charts: tuple[str, ...] = ("popular", "new-and-popular")
+    limit: int = 30
+    workers: int = 2
 
 
 @dataclass(frozen=True)
@@ -88,6 +97,7 @@ class HealthConfig:
     previous_count_ratio: float = 0.65
     apple_min_items: int = 180
     steam_min_items: int = 70
+    itch_min_items: int = 10
 
 
 @dataclass(frozen=True)
@@ -95,6 +105,7 @@ class Config:
     report: ReportConfig = field(default_factory=ReportConfig)
     apple: AppleConfig = field(default_factory=AppleConfig)
     steam: SteamConfig = field(default_factory=SteamConfig)
+    itch: ItchConfig = field(default_factory=ItchConfig)
     social: SocialConfig = field(default_factory=SocialConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
@@ -118,6 +129,7 @@ def load_config(path: Path) -> Config:
     report = _section(data, "report")
     apple = _section(data, "apple")
     steam = _section(data, "steam")
+    itch = _section(data, "itch")
     social = _section(data, "social")
     network = _section(data, "network")
     storage = _section(data, "storage")
@@ -128,11 +140,15 @@ def load_config(path: Path) -> Config:
             title=str(report.get("title", ReportConfig.title)),
             app_count=int(report.get("app_count", 8)),
             mobile_game_count=int(report.get("mobile_game_count", 6)),
-            steam_game_count=int(report.get("steam_game_count", ReportConfig.steam_game_count)),
+            non_mobile_game_count=int(report.get(
+                "non_mobile_game_count", report.get("steam_game_count", ReportConfig.non_mobile_game_count)
+            )),
             early_app_count=int(report.get("early_app_count", 2)),
             early_mobile_game_count=int(report.get("early_mobile_game_count", 2)),
-            early_steam_game_count=int(
-                report.get("early_steam_game_count", ReportConfig.early_steam_game_count)
+            early_non_mobile_game_count=int(
+                report.get("early_non_mobile_game_count", report.get(
+                    "early_steam_game_count", ReportConfig.early_non_mobile_game_count
+                ))
             ),
             timezone=str(report.get("timezone", ReportConfig.timezone)),
         ),
@@ -153,6 +169,13 @@ def load_config(path: Path) -> Config:
             limit=int(steam.get("limit", SteamConfig.limit)),
             workers=int(steam.get("workers", SteamConfig.workers)),
         ),
+        itch=ItchConfig(
+            enabled=bool(itch.get("enabled", ItchConfig.enabled)),
+            platforms=tuple(str(x) for x in itch.get("platforms", ItchConfig.platforms)),
+            charts=tuple(str(x) for x in itch.get("charts", ItchConfig.charts)),
+            limit=int(itch.get("limit", ItchConfig.limit)),
+            workers=int(itch.get("workers", ItchConfig.workers)),
+        ),
         social=SocialConfig(
             hacker_news_enabled=bool(social.get("hacker_news_enabled", True)),
             lookback_hours=int(social.get("lookback_hours", SocialConfig.lookback_hours)),
@@ -171,6 +194,7 @@ def load_config(path: Path) -> Config:
             ),
             apple_min_items=int(health.get("apple_min_items", HealthConfig.apple_min_items)),
             steam_min_items=int(health.get("steam_min_items", HealthConfig.steam_min_items)),
+            itch_min_items=int(health.get("itch_min_items", HealthConfig.itch_min_items)),
         ),
     )
     _validate(config)
@@ -181,12 +205,12 @@ def _validate(config: Config) -> None:
     segment_counts = {
         "app": config.report.app_count,
         "mobile_game": config.report.mobile_game_count,
-        "steam_game": config.report.steam_game_count,
+        "non_mobile_game": config.report.non_mobile_game_count,
     }
     early_counts = {
         "app": config.report.early_app_count,
         "mobile_game": config.report.early_mobile_game_count,
-        "steam_game": config.report.early_steam_game_count,
+        "non_mobile_game": config.report.early_non_mobile_game_count,
     }
     if any(value < 0 for value in segment_counts.values()) or not any(segment_counts.values()):
         raise ValueError("report segment counts must be non-negative with at least one enabled")
@@ -197,11 +221,19 @@ def _validate(config: Config) -> None:
         raise ValueError("apple.limit must be between 1 and 100")
     if not 1 <= config.steam.limit <= 100:
         raise ValueError("steam.limit must be between 1 and 100")
+    if not 1 <= config.itch.limit <= 30:
+        raise ValueError("itch.limit must be between 1 and 30")
+    if not set(config.itch.platforms).issubset({"web", "windows", "osx", "linux"}):
+        raise ValueError("itch.platforms must contain only desktop or web platforms")
+    if not config.itch.platforms or not config.itch.charts:
+        raise ValueError("itch platforms and charts must not be empty")
+    if not set(config.itch.charts).issubset({"popular", "new-and-popular"}):
+        raise ValueError("unsupported itch chart")
     if config.network.timeout_seconds < 1 or config.network.retries < 0:
         raise ValueError("invalid network timeout or retry count")
     if config.storage.retention_days < 8:
         raise ValueError("storage.retention_days must be at least 8")
     if not 0 < config.health.previous_count_ratio <= 1:
         raise ValueError("health.previous_count_ratio must be between 0 and 1")
-    if config.health.apple_min_items < 1 or config.health.steam_min_items < 1:
+    if min(config.health.apple_min_items, config.health.steam_min_items, config.health.itch_min_items) < 1:
         raise ValueError("health source minimums must be positive")

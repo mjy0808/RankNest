@@ -8,6 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .collectors.apple import collect_apple
+from .collectors.itch import collect_itch
 from .collectors.social import apply_hacker_news_mentions
 from .collectors.steam import collect_steam
 from .config import Config
@@ -74,6 +75,14 @@ def run_pipeline(config: Config, database_path: Path, output_dir: Path) -> Pipel
     steam_candidates, steam_statuses = collect_steam(config.steam, client)
     _merge(merged, steam_candidates)
     statuses.extend(steam_statuses)
+
+    itch_client = HttpClient(
+        timeout=min(config.network.timeout_seconds, 12),
+        retries=min(config.network.retries, 1),
+    )
+    itch_candidates, itch_statuses = collect_itch(config.itch, itch_client)
+    _merge(merged, itch_candidates)
+    statuses.extend(itch_statuses)
 
     candidates = list(merged.values())
     if config.social.hacker_news_enabled and candidates:

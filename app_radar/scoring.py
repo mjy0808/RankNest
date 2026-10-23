@@ -19,7 +19,7 @@ from .opportunities import build_opportunity_card
 SEGMENT_LABELS = {
     "app": "App",
     "mobile_game": "手游",
-    "steam_game": "Steam 游戏",
+    "non_mobile_game": "非手游",
 }
 
 SEGMENT_WEIGHTS: dict[str, dict[str, float]] = {
@@ -39,7 +39,7 @@ SEGMENT_WEIGHTS: dict[str, dict[str, float]] = {
         "产品新鲜度": 10,
         "可借鉴性": 25,
     },
-    "steam_game": {
+    "non_mobile_game": {
         "排名动量": 35,
         "口碑动量": 20,
         "讨论热度": 0,
@@ -50,11 +50,11 @@ SEGMENT_WEIGHTS: dict[str, dict[str, float]] = {
 }
 
 HORIZON_WEIGHTS = {1: 0.35, 3: 0.25, 7: 0.20, 14: 0.12, 30: 0.08}
-MIN_OPPORTUNITY_FIT = {"app": 72, "mobile_game": 72, "steam_game": 70}
-MIN_EARLY_OPPORTUNITY_FIT = {"app": 58, "mobile_game": 55, "steam_game": 58}
-MIN_EARLY_SIGNAL = {"app": 62, "mobile_game": 58, "steam_game": 62}
-EARLY_REVIEW_CAP = {"app": 12_000, "mobile_game": 20_000, "steam_game": 3_000}
-MATURE_REVIEW_LEVEL = {"app": 40_000, "mobile_game": 100_000, "steam_game": 10_000}
+MIN_OPPORTUNITY_FIT = {"app": 72, "mobile_game": 72, "non_mobile_game": 70}
+MIN_EARLY_OPPORTUNITY_FIT = {"app": 58, "mobile_game": 55, "non_mobile_game": 58}
+MIN_EARLY_SIGNAL = {"app": 62, "mobile_game": 58, "non_mobile_game": 62}
+EARLY_REVIEW_CAP = {"app": 12_000, "mobile_game": 20_000, "non_mobile_game": 3_000}
+MATURE_REVIEW_LEVEL = {"app": 40_000, "mobile_game": 100_000, "non_mobile_game": 10_000}
 EXCLUDED_OPPORTUNITY_TAGS = {
     "成熟头部产品",
     "平台或网络效应较强",
@@ -106,7 +106,8 @@ def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
 
 
 def _rank_strength(candidate: Candidate) -> float:
-    return _clamp((101 - candidate.best_rank) / 100)
+    limit = int(candidate.metadata.get("rank_limit", 100))
+    return _clamp((limit + 1 - candidate.best_rank) / max(limit, 1))
 
 
 def _traction_quality(candidate: Candidate) -> float:
@@ -235,7 +236,7 @@ def _implementation_feasibility(
         ):
             feasibility += 0.25
             tags.append("核心玩法易拆解")
-        elif candidate.segment == "steam_game" and steam_tags.intersection(
+        elif candidate.segment == "non_mobile_game" and steam_tags.intersection(
             STEAM_LIGHTWEIGHT_TAGS
         ):
             feasibility += 0.12
@@ -245,9 +246,9 @@ def _implementation_feasibility(
         ):
             feasibility -= 0.25
             tags.append("内容或系统量较大")
-            if candidate.segment == "steam_game":
+            if candidate.segment == "non_mobile_game":
                 risks.append("大型制作规模")
-        if candidate.segment == "steam_game":
+        if candidate.segment == "non_mobile_game":
             if steam_tags.intersection(STEAM_OPEN_WORLD_TAGS):
                 feasibility -= 0.35
                 risks.append("大型制作规模")
@@ -267,7 +268,7 @@ def _implementation_feasibility(
         is_simple_game = any(_contains_term(name, term) for term in SIMPLE_GAME_TERMS) or bool(
             genres.intersection(SIMPLE_GAME_GENRES)
         )
-        if candidate.segment == "steam_game" and sequel and not is_simple_game:
+        if candidate.segment == "non_mobile_game" and sequel and not is_simple_game:
             feasibility -= 0.18
             risks.append("续作或成熟 IP")
     if "™" in candidate.name or "®" in candidate.name or any(
@@ -333,6 +334,8 @@ def _risk_dimensions(
         distribution = APP_GENRE_FEASIBILITY.get(primary, 0.60)
     else:
         distribution = 0.72 if candidate.segment == "mobile_game" else 0.62
+    if candidate.source == "itch":
+        portability, distribution = 0.90, 0.78
     legal_safety = 1.0
     risks: list[str] = []
     if any(term in text for term in PUBLIC_SECTOR_TERMS):
@@ -366,7 +369,7 @@ def _opportunity_fit(candidate: Candidate, today: date) -> tuple[float, list[str
 
     age_days = (today - candidate.release_date).days if candidate.release_date else None
     if (
-        candidate.segment == "steam_game"
+        candidate.segment == "non_mobile_game"
         and age_days is not None
         and age_days > 1_825
         and _steam_tag_ids(candidate).intersection(STEAM_NETWORK_TAGS)
@@ -414,7 +417,7 @@ def _status_markets(statuses: list[SourceStatus], healthy_only: bool = True) -> 
         if "/" not in status.name:
             continue
         source_name, market = status.name.split("/", 1)
-        source = {"Apple": "apple", "Steam": "steam"}.get(source_name)
+        source = {"Apple": "apple", "Steam": "steam", "Itch": "itch"}.get(source_name)
         if source:
             markets.add((source, market.lower()))
     return markets
@@ -445,7 +448,8 @@ def _paired_rank_velocity(
     }
     if not keys:
         return None, 0.0
-    deltas = [previous_ranks.get(key, 101) - candidate.ranks.get(key, 101) for key in keys]
+    missing_rank = int(candidate.metadata.get("rank_limit", 100)) + 1
+    deltas = [previous_ranks.get(key, missing_rank) - candidate.ranks.get(key, missing_rank) for key in keys]
     total_delta = mean(deltas)
     return total_delta / max(snapshot.actual_days, 1), total_delta
 
@@ -638,6 +642,8 @@ def _raw_score(
 
 def _launch_signal(candidate: Candidate, today: date) -> tuple[float, int | None]:
     if candidate.release_date is None:
+        if "new-and-popular" in candidate.metadata.get("discovery_charts", []):
+            return 0.85, None
         return 0.20, None
     age_days = (today - candidate.release_date).days
     if -180 <= age_days < 0:
@@ -674,14 +680,15 @@ def _annotate_early_signals(raw_items: list[_RawScore], today: date) -> None:
         for item in group:
             candidate = item.candidate
             review_cap = EARLY_REVIEW_CAP[segment]
-            individual_saturation = _clamp(
+            reviews_unknown = candidate.metadata.get("review_count_unavailable", False)
+            individual_saturation = 0.50 if reviews_unknown else _clamp(
                 math.log1p(candidate.review_count) / math.log1p(review_cap * 4)
             )
             competition = _clamp(
                 0.60 * individual_saturation + 0.40 * theme_crowding
             )
             competition_score = round(competition * 100)
-            competition_level = (
+            competition_level = "竞争待核实" if reviews_unknown else (
                 "低竞争" if competition_score < 35
                 else "中等竞争" if competition_score < 65
                 else "高竞争"
@@ -714,6 +721,7 @@ def _annotate_early_signals(raw_items: list[_RawScore], today: date) -> None:
                 and (
                     candidate.market_count >= 2
                     or int(candidate.metadata.get("hn_exact_mentions", 0)) > 0
+                    or "new-and-popular" in candidate.metadata.get("discovery_charts", [])
                 )
             )
             early_candidate = bool(
@@ -723,6 +731,8 @@ def _annotate_early_signals(raw_items: list[_RawScore], today: date) -> None:
             )
 
             early_reasons: list[str] = []
+            if age_days is None and "new-and-popular" in candidate.metadata.get("discovery_charts", []):
+                early_reasons.append("进入 itch.io 新品热榜，上线日期待核实")
             if age_days is not None and age_days < 0:
                 early_reasons.append(f"距上线 {abs(age_days)} 天，已进入即将推出榜")
             elif age_days is not None and age_days <= 180:
@@ -731,11 +741,11 @@ def _annotate_early_signals(raw_items: list[_RawScore], today: date) -> None:
                 early_reasons.append("今天首次进入监控池")
             elif first_seen_days <= 7:
                 early_reasons.append(f"进入监控池仅 {first_seen_days} 天")
-            if candidate.review_count <= review_cap:
+            if candidate.review_count <= review_cap and not reviews_unknown:
                 early_reasons.append(
                     f"当前仅 {_compact_review_count(candidate.review_count)} 条评价，尚未高度饱和"
                 )
-            if theme_crowding <= 0.25:
+            if theme_crowding <= 0.25 and not reviews_unknown:
                 early_reasons.append("同主题成熟竞品密度较低")
 
             candidate.metadata["first_seen_days"] = first_seen_days
@@ -816,7 +826,10 @@ def score_all(
             competition_score = int(
                 item.candidate.metadata.get("competition_score", 0)
             ) / 100
-            competition_multiplier = 0.72 + 0.28 * (1 - competition_score)
+            competition_multiplier = (
+                0.86 if item.candidate.metadata.get("review_count_unavailable")
+                else 0.72 + 0.28 * (1 - competition_score)
+            )
             final_score = round(
                 base_score * actionability_multiplier * competition_multiplier, 2
             )
@@ -892,17 +905,38 @@ def select_segment_items(
             reverse=True,
         )
         reserve = min(max(int(early_counts.get(segment, 0)), 0), count)
-        early_picks = early_pool[:reserve]
-        picked_keys = {item.candidate.key for item in early_picks}
-        remaining = [item for item in standard if item.candidate.key not in picked_keys]
-        items = early_picks + remaining[: max(count - len(early_picks), 0)]
-        picked_keys = {item.candidate.key for item in items}
-        if len(items) < count:
-            items.extend(
-                item for item in early_pool
-                if item.candidate.key not in picked_keys
-            )
-        items = items[:count]
+        items: list[ScoredCandidate] = []
+        picked_keys: set[tuple[str, str]] = set()
+        picked_names: set[str] = set()
+
+        def add_unique(item: ScoredCandidate) -> None:
+            normalized = re.sub(r"[\W_]+", "", item.candidate.name.casefold())
+            if item.candidate.key in picked_keys or len(items) >= count:
+                return
+            if segment == "non_mobile_game" and normalized in picked_names:
+                return
+            items.append(item)
+            picked_keys.add(item.candidate.key)
+            picked_names.add(normalized)
+
+        for item in early_pool:
+            if len(items) >= reserve:
+                break
+            add_unique(item)
+        # A large Steam pool must not drown out eligible browser/indie discoveries.
+        if segment == "non_mobile_game":
+            pool = standard + early_pool
+            for source in sorted({item.candidate.source for item in pool}):
+                if any(item.candidate.source == source for item in items):
+                    continue
+                for item in pool:
+                    if item.candidate.source == source:
+                        before = len(items)
+                        add_unique(item)
+                        if len(items) > before:
+                            break
+        for item in standard + early_pool:
+            add_unique(item)
         items.sort(
             key=lambda item: (
                 item.candidate.metadata.get("opportunity_tier") == "validated",

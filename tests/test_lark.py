@@ -34,7 +34,7 @@ class LarkTests(unittest.TestCase):
                     }
                 ],
                 "mobile_game": [],
-                "steam_game": [],
+                "non_mobile_game": [],
             },
         }
 

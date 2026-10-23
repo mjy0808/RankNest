@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 SEGMENT_TITLES = {
     "app": "App",
     "mobile_game": "手游",
-    "steam_game": "Steam 游戏",
+    "non_mobile_game": "非手游",
 }
 ALLOWED_WEBHOOK_HOSTS = {"open.feishu.cn", "open.larksuite.com"}
 
@@ -23,7 +23,7 @@ ALLOWED_WEBHOOK_HOSTS = {"open.feishu.cn", "open.larksuite.com"}
 def _top_lines(payload: dict[str, Any], count: int = 3) -> list[str]:
     lines: list[str] = []
     sections = payload.get("sections", {})
-    for segment in ("app", "mobile_game", "steam_game"):
+    for segment in ("app", "mobile_game", "non_mobile_game"):
         items = sections.get(segment, []) if isinstance(sections, dict) else []
         if not items:
             continue
@@ -57,7 +57,7 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
     sections = payload.get("sections", {})
     early_items = [
         item
-        for segment in ("app", "mobile_game", "steam_game")
+        for segment in ("app", "mobile_game", "non_mobile_game")
         for item in (sections.get(segment, []) if isinstance(sections, dict) else [])
         if item.get("early_candidate")
     ]

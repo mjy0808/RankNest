@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>New &amp; popular Web games</title>
+    <item>
+      <title>Tiny Repair Workshop</title>
+      <link>https://tiny-studio.itch.io/repair-workshop</link>
+      <dc:creator>Tiny Studio</dc:creator>
+      <pubDate>Thu, 22 Oct 2026 10:00:00 GMT</pubDate>
+      <category>Simulation</category>
+      <description><![CDATA[<img src="https://img.itch.zone/repair.png"><p>A short repair puzzle for your browser.</p>]]></description>
+    </item>
+    <item>
+      <title>Ignored invalid destination</title>
+      <link>https://example.com/not-a-game</link>
+    </item>
+  </channel>
+</rss>

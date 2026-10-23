@@ -1,0 +1,55 @@
+name: Validate radar changes
+
+on:
+  pull_request:
+    paths:
+      - "app_radar/**"
+      - "tests/**"
+      - "config.json"
+      - ".github/workflows/validate-radar.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -v
+
+  game-source-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check public Steam and itch.io feeds without publishing
+        run: |
+          python - <<'PY'
+          from app_radar.collectors.itch import collect_itch
+          from app_radar.collectors.steam import collect_steam
+          from app_radar.config import ItchConfig, SteamConfig
+          from app_radar.http import HttpClient
+          client = HttpClient(timeout=20, retries=1)
+          sources = [
+              collect_steam(SteamConfig(markets=("us",), charts=("popularnew",), limit=20), client),
+              collect_itch(ItchConfig(platforms=("web", "windows"), charts=("new-and-popular",), limit=20), client),
+          ]
+          failed = []
+          for candidates, statuses in sources:
+              for status in statuses:
+                  print(status.as_dict())
+                  if not status.usable:
+                      failed.append(status.name)
+              print("Parsed candidates:", len(candidates))
+          if failed:
+              raise SystemExit("Public source unavailable: " + ", ".join(failed))
+          PY

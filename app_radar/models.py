@@ -30,8 +30,8 @@ class Candidate:
 
     @property
     def segment(self) -> str:
-        if self.source == "steam":
-            return "steam_game"
+        if self.source in {"steam", "itch"}:
+            return "non_mobile_game"
         if self.kind == "game":
             return "mobile_game"
         return "app"
@@ -92,7 +92,10 @@ class Candidate:
         if other.kind == "game":
             self.kind = "game"
         for key, value in other.metadata.items():
-            self.metadata.setdefault(key, value)
+            if key in {"platforms", "discovery_charts"} and isinstance(value, list):
+                self.metadata[key] = list(dict.fromkeys(self.metadata.get(key, []) + value))
+            else:
+                self.metadata.setdefault(key, value)
 
 
 @dataclass(frozen=True)

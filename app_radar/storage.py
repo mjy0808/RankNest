@@ -87,6 +87,7 @@ SNAPSHOT_METADATA_KEYS = {
     "early_candidate",
     "competition_score",
     "competition_level",
+    "platforms", "discovery_charts", "rank_limit", "review_count_unavailable",
 }
 
 
@@ -171,7 +172,7 @@ class RadarStore:
             if "/" not in name:
                 continue
             source_name, market = name.split("/", 1)
-            source = {"Apple": "apple", "Steam": "steam"}.get(source_name)
+            source = {"Apple": "apple", "Steam": "steam", "Itch": "itch"}.get(source_name)
             if source:
                 markets.add((source, market.lower()))
         return frozenset(markets)
@@ -213,7 +214,7 @@ class RadarStore:
                 ranks=rank_values,
                 review_counts=review_values,
                 name=str(name or ""),
-                segment=str(segment or ""),
+                segment="non_mobile_game" if segment == "steam_game" else str(segment or ""),
             )
         return observations
 
