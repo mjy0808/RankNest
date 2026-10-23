@@ -59,7 +59,7 @@ class StorageAndReportTests(unittest.TestCase):
                 self.assertEqual(first_seen[candidate.key], 1)
                 self.assertEqual(first_seen[("apple", "unseen")], 0)
 
-            sections = select_segment_items(scored, {"app": 1, "mobile_game": 1, "steam_game": 1})
+            sections = select_segment_items(scored, {"app": 1, "mobile_game": 1, "non_mobile_game": 1})
             candidate.metadata["selected_streak"] = 2
             artifacts = write_report(
                 root / "reports", "测试日报", captured, sections, statuses, 1,
@@ -80,7 +80,7 @@ class StorageAndReportTests(unittest.TestCase):
             self.assertTrue(artifacts.dated_json.exists())
             self.assertIn("JSON", (root / "reports/archive/index.html").read_text())
             payload = json.loads(artifacts.latest_json.read_text(encoding="utf-8"))
-            self.assertEqual(payload["schema_version"], 5)
+            self.assertEqual(payload["schema_version"], 6)
             self.assertEqual(payload["run_id"], run_id)
             self.assertEqual(payload["data_fingerprint"], "abc123")
             self.assertEqual(payload["sections"]["app"][0]["external_id"], "42")
@@ -92,6 +92,20 @@ class StorageAndReportTests(unittest.TestCase):
             self.assertIn("early_signal_score", payload["sections"]["app"][0])
             self.assertIn("competition_score", payload["sections"]["app"][0])
             self.assertEqual(payload["themes"][0]["label"], "高频轻工具")
+
+    def test_legacy_steam_history_is_loaded_into_non_mobile_segment(self) -> None:
+        candidate = Candidate("steam", "legacy", "Legacy Puzzle", "game")
+        scored = score_all([candidate], {}, [SourceStatus("Steam/US", 100)], date(2026, 10, 22))
+        with tempfile.TemporaryDirectory() as directory:
+            with RadarStore(Path(directory) / "radar.db") as store:
+                store.save_run(
+                    datetime(2026, 10, 22, tzinfo=timezone.utc), date(2026, 10, 22),
+                    "Asia/Shanghai", "legacy", Path(directory) / "old.html", [], scored,
+                )
+                store.connection.execute("UPDATE observations SET segment = 'steam_game'")
+                store.connection.commit()
+                history = store.load_history(date(2026, 10, 23), "Asia/Shanghai")
+                self.assertEqual(history[1].observations[candidate.key].segment, "non_mobile_game")
 
 
 if __name__ == "__main__":

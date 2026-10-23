@@ -10,7 +10,7 @@ from app_radar.scoring import score_all, select_segment_items
 def make_candidate(
     external_id: str, segment: str = "app", rank: int = 20, reviews: int = 1200
 ) -> Candidate:
-    source = "steam" if segment == "steam_game" else "apple"
+    source = "steam" if segment == "non_mobile_game" else "apple"
     kind = "game" if segment != "app" else "app"
     return Candidate(
         source=source,
@@ -82,15 +82,15 @@ class ScoringTests(unittest.TestCase):
 
     def test_three_segments_are_selected_independently(self) -> None:
         candidates = []
-        for segment in ("app", "mobile_game", "steam_game"):
+        for segment in ("app", "mobile_game", "non_mobile_game"):
             for index in range(5):
                 candidates.append(make_candidate(f"{segment}-{index}", segment=segment, rank=index + 1))
         scored = score_all(candidates, {}, statuses(), date(2026, 8, 11))
         sections = select_segment_items(
-            scored, {"app": 3, "mobile_game": 2, "steam_game": 4}
+            scored, {"app": 3, "mobile_game": 2, "non_mobile_game": 4}
         )
         self.assertEqual({key: len(value) for key, value in sections.items()}, {
-            "app": 3, "mobile_game": 2, "steam_game": 4
+            "app": 3, "mobile_game": 2, "non_mobile_game": 4
         })
         for segment, items in sections.items():
             self.assertTrue(all(item.candidate.segment == segment for item in items))
@@ -112,15 +112,15 @@ class ScoringTests(unittest.TestCase):
         self.assertIn("成熟头部产品", mature.metadata["opportunity_tags"])
 
     def test_ip_and_low_fit_products_are_not_selected(self) -> None:
-        safe = make_candidate("safe", segment="steam_game", rank=5, reviews=500)
+        safe = make_candidate("safe", segment="non_mobile_game", rank=5, reviews=500)
         safe.name = "Tiny Repair Simulator"
-        risky = make_candidate("risky", segment="steam_game", rank=1, reviews=500)
+        risky = make_candidate("risky", segment="non_mobile_game", rank=1, reviews=500)
         risky.name = "Famous Franchise™ Legacy Edition"
         scored = score_all([safe, risky], {}, statuses(), date(2026, 8, 13))
         sections = select_segment_items(
-            scored, {"app": 1, "mobile_game": 1, "steam_game": 2}
+            scored, {"app": 1, "mobile_game": 1, "non_mobile_game": 2}
         )
-        ids = [item.candidate.external_id for item in sections["steam_game"]]
+        ids = [item.candidate.external_id for item in sections["non_mobile_game"]]
         self.assertIn("safe", ids)
         self.assertNotIn("risky", ids)
 
@@ -150,7 +150,7 @@ class ScoringTests(unittest.TestCase):
             [confirmed, newcomer], {1: snapshot}, statuses(), date(2026, 8, 19)
         )
         selected = select_segment_items(
-            scored, {"app": 2, "mobile_game": 1, "steam_game": 1}
+            scored, {"app": 2, "mobile_game": 1, "non_mobile_game": 1}
         )["app"]
         self.assertEqual(selected[0].candidate.external_id, "confirmed")
         self.assertEqual(confirmed.metadata["opportunity_tier"], "validated")
@@ -163,14 +163,14 @@ class ScoringTests(unittest.TestCase):
         government.developer = "Bundesagentur fuer Arbeit"
         proxy = make_candidate("proxy", rank=2, reviews=1600)
         proxy.name = "Rule Based Proxy"
-        sequel = make_candidate("sequel", segment="steam_game", rank=1, reviews=500)
+        sequel = make_candidate("sequel", segment="non_mobile_game", rank=1, reviews=500)
         sequel.name = "The Heavy Adventure 2"
         sequel.metadata = {"genre": "Adventure"}
-        live_service = make_candidate("live-service", segment="steam_game", rank=2, reviews=700)
+        live_service = make_candidate("live-service", segment="non_mobile_game", rank=2, reviews=700)
         live_service.name = "Anime Action Online"
         live_service.metadata = {"steam_tag_ids": "[113,19,122,4085]"}
         heavy_upcoming = make_candidate(
-            "heavy-upcoming", segment="steam_game", rank=3, reviews=0
+            "heavy-upcoming", segment="non_mobile_game", rank=3, reviews=0
         )
         heavy_upcoming.name = "Onimusha: Way of the Sword"
         heavy_upcoming.metadata = {
@@ -184,7 +184,7 @@ class ScoringTests(unittest.TestCase):
         major_mobile.metadata = {
             "genre": "Games", "file_size_bytes": "1068915712"
         }
-        safe_game = make_candidate("safe-game", segment="steam_game", rank=10, reviews=500)
+        safe_game = make_candidate("safe-game", segment="non_mobile_game", rank=10, reviews=500)
         safe_game.name = "Tiny Repair Simulator"
         scored = score_all(
             [
@@ -194,10 +194,10 @@ class ScoringTests(unittest.TestCase):
             {}, statuses(), date(2026, 8, 19)
         )
         sections = select_segment_items(
-            scored, {"app": 3, "mobile_game": 1, "steam_game": 3}
+            scored, {"app": 3, "mobile_game": 1, "non_mobile_game": 3}
         )
         app_ids = {item.candidate.external_id for item in sections["app"]}
-        steam_ids = {item.candidate.external_id for item in sections["steam_game"]}
+        steam_ids = {item.candidate.external_id for item in sections["non_mobile_game"]}
         self.assertEqual(app_ids, {"safe-app"})
         self.assertEqual(steam_ids, {"safe-game"})
         self.assertIn("政府或机构专属", government.metadata["opportunity_risks"])
@@ -221,8 +221,8 @@ class ScoringTests(unittest.TestCase):
         )
         selected = select_segment_items(
             scored,
-            {"app": 2, "mobile_game": 1, "steam_game": 1},
-            {"app": 1, "mobile_game": 0, "steam_game": 0},
+            {"app": 2, "mobile_game": 1, "non_mobile_game": 1},
+            {"app": 1, "mobile_game": 0, "non_mobile_game": 0},
         )["app"]
         self.assertIn("newcomer-early", {item.candidate.external_id for item in selected})
         self.assertTrue(newcomer.metadata["early_candidate"])

@@ -13,6 +13,11 @@ on:
         required: false
         default: true
         type: boolean
+      resend:
+        description: "Only resend today's published report to Lark (no rebuild or deployment)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -38,9 +43,18 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            if (
+              context.eventName === "workflow_dispatch"
+              && String(context.payload?.inputs?.resend).toLowerCase() === "true"
+            ) {
+              core.info("Notification-only resend requested; skipping report generation.");
+              core.setOutput("should_run", "false");
+              return;
+            }
             const externalDedupe =
               context.eventName === "workflow_dispatch"
-              && String(context.payload?.inputs?.force).toLowerCase() === "false";
+              && String(context.payload?.inputs?.force).toLowerCase() === "false"
+              && String(context.payload?.inputs?.resend).toLowerCase() !== "true";
             if (context.eventName !== "schedule" && !externalDedupe) {
               core.info("Forced manual dispatch always runs.");
               core.setOutput("should_run", "true");
@@ -189,6 +203,76 @@ jobs:
         env:
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
         run: python -m app_radar.lark --report reports/latest.json --url "${{ steps.deployment.outputs.page_url }}"
+
+  resend-notification:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.resend }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Find today's published report
+        id: report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const parts = Object.fromEntries(
+              new Intl.DateTimeFormat("en-US", {
+                timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+              }).formatToParts(new Date()).map(({ type, value }) => [type, value]),
+            );
+            const day = `${parts.year}-${parts.month}-${parts.day}`;
+            const start = new Date(`${day}T00:00:00+08:00`);
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner, repo: context.repo.repo,
+              workflow_id: "daily-radar.yml", branch: "main", status: "success", per_page: 100,
+            });
+            for (const run of data.workflow_runs) {
+              if (new Date(run.created_at) < start) continue;
+              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+                owner: context.repo.owner, repo: context.repo.repo, run_id: run.id, per_page: 100,
+              });
+              const report = artifacts.find(item =>
+                item.name === `potential-radar-${run.id}` && !item.expired,
+              );
+              if (!report) continue;
+              core.setOutput("run_id", String(run.id));
+              core.setOutput("artifact_name", report.name);
+              core.info(`Resending published report from ${run.html_url} for ${day}`);
+              return;
+            }
+            throw new Error(`No published report artifact found for ${day}; generate the daily report first.`);
+
+      - name: Download today's report
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.report.outputs.artifact_name }}
+          run-id: ${{ steps.report.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: reports/
+
+      - name: Resend today's Lark notification
+        env:
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          with open("reports/latest.json", encoding="utf-8") as report:
+              payload = json.load(report)
+          today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+          if str(payload.get("generated_at", ""))[:10] != today:
+              raise SystemExit("Refusing to resend a report from a different date")
+          PY
+          python -m app_radar.lark --report reports/latest.json --url "https://mjy0808.github.io/RankNest/" --force
 
   notify-failure:
     runs-on: ubuntu-latest

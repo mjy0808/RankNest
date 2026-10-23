@@ -100,6 +100,7 @@ def parse_results_html(results_html: str, market: str, chart: str) -> list[Candi
                 if tags_match
                 else [],
                 "steam_tag_ids": tag_ids_match.group(1) if tag_ids_match else "",
+                "platforms": ["PC / 桌面"],
             },
         )
         parsed.append(candidate)

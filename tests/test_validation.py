@@ -53,7 +53,7 @@ class ValidationTests(unittest.TestCase):
                 social_mentions=0,
                 selected_rank=1,
                 name="Old Steam Recommendation",
-                segment="steam_game",
+                segment="non_mobile_game",
             ),
         }
         snapshot = HistorySnapshot(

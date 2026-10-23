@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import unittest
 import tempfile
+import json
+import os
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from urllib.error import HTTPError
 from unittest.mock import patch
 
-from app_radar.lark import _already_sent, _mark_sent, build_card, build_failure_card, send_card
+from app_radar.lark import _already_sent, _mark_sent, build_card, build_failure_card, main, send_card
 
 
 class LarkTests(unittest.TestCase):
@@ -34,7 +38,7 @@ class LarkTests(unittest.TestCase):
                     }
                 ],
                 "mobile_game": [],
-                "steam_game": [],
+                "non_mobile_game": [],
             },
         }
 
@@ -62,6 +66,23 @@ class LarkTests(unittest.TestCase):
             _mark_sent(state, "2026-08-13", "abc")
             self.assertTrue(_already_sent(state, "2026-08-13"))
             self.assertFalse(_already_sent(state, "2026-08-14"))
+
+    @patch.dict(os.environ, {"LARK_WEBHOOK_URL": "https://open.larksuite.com/open-apis/bot/v2/hook/test"})
+    @patch("app_radar.lark.send_card")
+    def test_explicit_resend_bypasses_same_day_deduplication(self, mocked_send) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state.json"
+            report = root / "report.json"
+            report.write_text(json.dumps(self.payload), encoding="utf-8")
+            _mark_sent(state, "2026-08-13", "already-sent")
+            args = ["--report", str(report), "--state", str(state), "--url", "https://example.com/report"]
+            with redirect_stdout(StringIO()):
+                self.assertEqual(main(args), 0)
+                mocked_send.assert_not_called()
+                self.assertEqual(main(args + ["--force"]), 0)
+            mocked_send.assert_called_once()
+            self.assertTrue(_already_sent(state, "2026-08-13"))
 
     def test_rejects_non_lark_webhook_host(self) -> None:
         with self.assertRaises(ValueError):

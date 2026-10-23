@@ -9,7 +9,7 @@ def assess_source_health(
     previous_counts: dict[str, int],
     config: HealthConfig,
 ) -> list[SourceStatus]:
-    """Downgrade suspiciously small Apple and Steam snapshots.
+    """Downgrade suspiciously small store snapshots.
 
     Collectors already flag an empty or partially parsed chart. This second
     layer catches plausible-looking responses whose overall item count has
@@ -17,7 +17,11 @@ def assess_source_health(
     """
 
     assessed: list[SourceStatus] = []
-    minimums = {"Apple": config.apple_min_items, "Steam": config.steam_min_items}
+    minimums = {
+        "Apple": config.apple_min_items,
+        "Steam": config.steam_min_items,
+        "Itch": config.itch_min_items,
+    }
     for status in statuses:
         source = status.name.split("/", 1)[0]
         if source not in minimums or status.state in {"failed", "disabled"}:
