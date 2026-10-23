@@ -84,6 +84,7 @@ KNOWN_IP_REFERENCE_TERMS = {
     "lord of the rings", "game of thrones",
     "microsoft flight simulator",
     "final fantasy", "one piece", "kirby", "warhammer", "godzilla",
+    "onimusha", "nba 2k", "call of duty", "monster hunter",
 }
 MAJOR_GAME_PUBLISHER_TERMS = {
     "activision", "bandai namco", "blizzard", "capcom", "electronic arts",
@@ -932,6 +933,13 @@ def select_segment_items(
                     continue
                 for item in pool:
                     if item.candidate.source == source:
+                        before = len(items)
+                        add_unique(item)
+                        if len(items) > before:
+                            break
+            if not any("Web" in item.candidate.metadata.get("platforms", []) for item in items):
+                for item in pool:
+                    if "Web" in item.candidate.metadata.get("platforms", []):
                         before = len(items)
                         add_unique(item)
                         if len(items) > before:

@@ -42,7 +42,8 @@ class ItchTests(unittest.TestCase):
 
     def test_known_franchise_cannot_enter_non_mobile_rankings(self) -> None:
         games = [Candidate("steam", name, name, "game") for name in (
-            "FINAL FANTASY RESONANCE", "ONE PIECE: Grand Gourmet"
+            "FINAL FANTASY RESONANCE", "ONE PIECE: Grand Gourmet",
+            "NBA 2K27", "Onimusha: Way of the Sword",
         )]
         scored = score_all(games, {}, [SourceStatus("Steam/US", 100)], date(2026, 10, 23))
         self.assertEqual(select_segment_items(scored, {"non_mobile_game": 6})["non_mobile_game"], [])
@@ -67,11 +68,12 @@ class ItchTests(unittest.TestCase):
         self.assertEqual(statuses[0].state, "degraded")
         self.assertIn("temporary timeout", statuses[0].detail)
 
-    def test_non_mobile_ranking_keeps_both_sources_and_deduplicates_titles(self) -> None:
+    def test_non_mobile_ranking_keeps_sources_web_and_unique_titles(self) -> None:
         def item(source: str, name: str, score: float) -> ScoredCandidate:
             candidate = Candidate(
                 source, name, name, "game", metadata={
-                    "opportunity_fit": 90, "opportunity_tier": "validated"
+                    "opportunity_fit": 90, "opportunity_tier": "validated",
+                    "platforms": ["Web"] if name == "Browser Puzzle" else ["Windows"],
                 }
             )
             return ScoredCandidate(candidate, score, {}, {}, (), None)
@@ -81,8 +83,10 @@ class ItchTests(unittest.TestCase):
             item("itch", "Shared Game", 98),
             item("steam", "Steam Game", 97),
             item("steam", "Another Steam Game", 96),
+            item("itch", "Desktop Indie", 80),
             item("itch", "Browser Puzzle", 65),
-        ], {"non_mobile_game": 3})
+        ], {"non_mobile_game": 4})
         selected = sections["non_mobile_game"]
-        self.assertEqual(len({value.candidate.name for value in selected}), 3)
+        self.assertEqual(len({value.candidate.name for value in selected}), 4)
         self.assertEqual({value.candidate.source for value in selected}, {"steam", "itch"})
+        self.assertIn("Browser Puzzle", {value.candidate.name for value in selected})
