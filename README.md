@@ -65,6 +65,8 @@ python3 -m http.server 8000 --directory reports
 
 在仓库的 Actions secrets 中配置 `LARK_WEBHOOK_URL`。实际 Webhook 只存放在 Secret 中；代码、工作流和日志都不包含它。
 
+需要补发当天飞书消息时，在手动运行表单勾选 `resend`：只下载 `main` 分支今天已发布的报告并重新发送，不重新抓取或部署 Pages；没有今日报告则报错。默认不勾选，仍按日期防止重复发送。`force` 只控制常规运行是否重新生成日报；`resend` 会跳过生成阶段并显式绕过飞书同日去重。本地对应 `python -m app_radar.lark --report reports/latest.json --url <报告地址> --force`。
+
 GitHub Actions cache 会保存 SQLite 历史、日报归档和飞书发送状态；报告和数据库也分别作为 30 天 artifact 上传，便于恢复。数据库与 Pages 归档默认保留 45 天，避免长期膨胀。首次运行是冷启动基线；之后依次启用 1、3、7、14、30 日变化与回测。超过 7 天没有运行时缓存可能被清理，报告会明确重新进入历史积累状态。
 
 ### 可选：需要准点时使用外部免费定时器

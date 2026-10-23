@@ -230,6 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", type=Path, default=Path("reports/latest.json"))
     parser.add_argument("--url", help="GitHub Pages 完整报告地址")
     parser.add_argument("--state", type=Path, default=Path("data/lark-state.json"))
+    parser.add_argument("--force", action="store_true", help="按请求重新发送已发过的当日日报")
     parser.add_argument("--failure", action="store_true", help="发送工作流失败告警")
     parser.add_argument("--detail", default="未知阶段")
     args = parser.parse_args(argv)
@@ -246,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("缺少 --url")
     payload = json.loads(args.report.read_text(encoding="utf-8"))
     report_day = str(payload.get("generated_at", ""))[:10]
-    if _already_sent(args.state, report_day):
+    if not args.force and _already_sent(args.state, report_day):
         print(f"飞书摘要已于 {report_day} 成功发送，跳过同日重复通知")
         return 0
     send_card(webhook_url, build_card(payload, args.url))
