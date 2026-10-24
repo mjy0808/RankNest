@@ -70,8 +70,12 @@ class ReportTabsTests(unittest.TestCase):
                 elements.feed(body)
                 self.assertEqual(len(elements.tabs), 3)
                 self.assertEqual(len(elements.panels), 3)
+                self.assertEqual([tab["id"] for tab in elements.tabs], [
+                    "tab-mobile_game", "tab-non_mobile_game", "tab-app",
+                ])
                 self.assertEqual(elements.theme_locations, [
-                    (f"panel-{segment}", segment) for segment in preview_sections()
+                    (f"panel-{segment}", segment)
+                    for segment in ("mobile_game", "non_mobile_game", "app")
                 ])
                 for index, (tab, panel) in enumerate(zip(elements.tabs, elements.panels)):
                     self.assertEqual(tab["aria-controls"], panel["id"])

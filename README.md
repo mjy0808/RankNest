@@ -57,7 +57,7 @@ python3 -m http.server 8000 --directory reports
 
 然后访问 `http://127.0.0.1:8000/latest.html`。
 
-默认显示 App，可用 `#mobile_game`、`#non_mobile_game` 直达另外两个 Tab；例如 `latest.html#non_mobile_game`。新生成的历史日报也支持 Tab；禁用 JavaScript 时会完整显示各榜单。
+Tab 顺序为“手游 → 非手游 → App”，默认显示手游；可用 `#mobile_game`、`#non_mobile_game`、`#app` 直达对应分类，例如 `latest.html#non_mobile_game`。新生成的历史日报也支持 Tab；禁用 JavaScript 时会按相同顺序完整显示各榜单。
 
 ## GitHub Pages 与飞书通知
 

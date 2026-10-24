@@ -24,18 +24,18 @@ class ReportConfig:
     @property
     def segment_counts(self) -> dict[str, int]:
         values = {
-            "app": self.app_count,
             "mobile_game": self.mobile_game_count,
             "non_mobile_game": self.non_mobile_game_count,
+            "app": self.app_count,
         }
         return {segment: count for segment, count in values.items() if count > 0}
 
     @property
     def segment_early_counts(self) -> dict[str, int]:
         values = {
-            "app": self.early_app_count,
             "mobile_game": self.early_mobile_game_count,
             "non_mobile_game": self.early_non_mobile_game_count,
+            "app": self.early_app_count,
         }
         return {
             segment: count

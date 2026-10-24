@@ -75,6 +75,12 @@ def _source_label(source: str) -> str:
     return {"apple": "App Store", "steam": "Steam", "itch": "itch.io"}.get(source, source.title())
 
 
+def _ordered_sections(
+    sections: dict[str, list[ScoredCandidate]],
+) -> dict[str, list[ScoredCandidate]]:
+    return {segment: sections[segment] for segment in SEGMENT_LABELS if segment in sections}
+
+
 def _rank_change(rank: int, item: ScoredCandidate) -> int | None:
     if item.previous is None or item.previous.selected_rank is None:
         return None
@@ -335,6 +341,7 @@ def render_html(
     history_href: str = "archive/",
     latest_href: str | None = None,
 ) -> str:
+    sections = _ordered_sections(sections)
     if themes is None:
         themes = build_theme_summaries(sections)
     healthy, degraded, failed = _status_summary(statuses)
@@ -486,6 +493,7 @@ def render_text(
     themes: list[dict[str, Any]] | None = None,
     backtest: dict[str, Any] | None = None,
 ) -> str:
+    sections = _ordered_sections(sections)
     if themes is None:
         themes = build_theme_summaries(sections)
     lines = [
@@ -559,6 +567,7 @@ def write_report(
     backtest: dict[str, Any] | None = None,
     retention_days: int = 45,
 ) -> ReportArtifacts:
+    sections = _ordered_sections(sections)
     if themes is None:
         themes = build_theme_summaries(sections)
     output_dir.mkdir(parents=True, exist_ok=True)

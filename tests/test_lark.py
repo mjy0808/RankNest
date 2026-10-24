@@ -68,8 +68,8 @@ class LarkTests(unittest.TestCase):
         self.payload["sections"]["mobile_game"] = [{"name": "Mobile Puzzle"}]
         self.payload["sections"]["non_mobile_game"] = [{"name": "Desktop Repair"}]
         content = "\n".join(_top_lines(self.payload))
-        app, rest = content.split("**手游 Top 1**", 1)
-        mobile, desktop = rest.split("**非手游 Top 1**", 1)
+        mobile, rest = content.split("**非手游 Top 1**", 1)
+        desktop, app = rest.split("**App Top 1**", 1)
         self.assertIn("高频轻工具", app)
         self.assertNotIn("短回合益智", app)
         self.assertIn("短回合益智", mobile)
