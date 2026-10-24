@@ -13,9 +13,9 @@ from urllib.request import Request, urlopen
 
 
 SEGMENT_TITLES = {
-    "app": "App",
     "mobile_game": "手游",
     "non_mobile_game": "非手游",
+    "app": "App",
 }
 ALLOWED_WEBHOOK_HOSTS = {"open.feishu.cn", "open.larksuite.com"}
 
@@ -23,11 +23,26 @@ ALLOWED_WEBHOOK_HOSTS = {"open.feishu.cn", "open.larksuite.com"}
 def _top_lines(payload: dict[str, Any], count: int = 3) -> list[str]:
     lines: list[str] = []
     sections = payload.get("sections", {})
-    for segment in ("app", "mobile_game", "non_mobile_game"):
+    for segment in SEGMENT_TITLES:
         items = sections.get(segment, []) if isinstance(sections, dict) else []
         if not items:
             continue
         lines.append(f"**{SEGMENT_TITLES[segment]} Top {min(count, len(items))}**")
+        grouped_themes = payload.get("themes_by_segment", {})
+        themes = (
+            grouped_themes.get(segment, []) if isinstance(grouped_themes, dict) else []
+        )
+        if not themes:
+            themes = [
+                theme for theme in payload.get("themes", [])
+                if theme.get("segment") == segment
+            ]
+        if themes:
+            theme_text = "、".join(
+                f"{theme.get('label', '未知')}({theme.get('count', 0)})"
+                for theme in themes[:3]
+            )
+            lines.append(f"**机会主题：** {theme_text}")
         for item in items[:count]:
             reasons = item.get("reasons") or []
             reason = f" · {reasons[0]}" if reasons else ""
@@ -57,7 +72,7 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
     sections = payload.get("sections", {})
     early_items = [
         item
-        for segment in ("app", "mobile_game", "non_mobile_game")
+        for segment in SEGMENT_TITLES
         for item in (sections.get(segment, []) if isinstance(sections, dict) else [])
         if item.get("early_candidate")
     ]
@@ -70,13 +85,6 @@ def build_card(payload: dict[str, Any], report_url: str) -> dict[str, Any]:
             for item in early_items[:6]
         )
         content = f"**更早期苗头：** {early_text}\n\n{content}"
-    themes = payload.get("themes", [])
-    if isinstance(themes, list) and themes:
-        theme_text = "、".join(
-            f"{theme.get('label', '未知')}({theme.get('count', 0)})"
-            for theme in themes[:3]
-        )
-        content += f"\n\n**今日机会主题：** {theme_text}"
     horizons = payload.get("backtest", {}).get("horizons", {})
     if isinstance(horizons, dict) and horizons:
         latest_horizon = min(horizons, key=lambda value: int(value))

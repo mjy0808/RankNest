@@ -17,9 +17,9 @@ from .opportunities import build_opportunity_card
 
 
 SEGMENT_LABELS = {
-    "app": "App",
     "mobile_game": "手游",
     "non_mobile_game": "非手游",
+    "app": "App",
 }
 
 SEGMENT_WEIGHTS: dict[str, dict[str, float]] = {

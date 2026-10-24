@@ -195,14 +195,14 @@ def build_opportunity_card(candidate: Candidate) -> dict[str, Any]:
 def build_theme_summaries(
     sections: dict[str, list[ScoredCandidate]], limit: int = 6
 ) -> list[dict[str, Any]]:
-    grouped: dict[str, list[ScoredCandidate]] = defaultdict(list)
-    for items in sections.values():
+    grouped: dict[tuple[str, str], list[ScoredCandidate]] = defaultdict(list)
+    for segment, items in sections.items():
         for item in items:
             key = str(item.candidate.metadata.get("opportunity_theme_key", ""))
             if key:
-                grouped[key].append(item)
+                grouped[(segment, key)].append(item)
     summaries: list[dict[str, Any]] = []
-    for key, items in grouped.items():
+    for (segment, key), items in grouped.items():
         if len(items) < 2:
             continue
         validated = sum(
@@ -210,6 +210,7 @@ def build_theme_summaries(
         )
         summaries.append(
             {
+                "segment": segment,
                 "key": key,
                 "label": THEME_LABELS.get(key, key),
                 "count": len(items),
@@ -231,4 +232,8 @@ def build_theme_summaries(
         key=lambda value: (value["validated_count"], value["count"], value["average_score"]),
         reverse=True,
     )
-    return summaries[:limit]
+    return [
+        theme
+        for segment in sections
+        for theme in [value for value in summaries if value["segment"] == segment][:limit]
+    ]

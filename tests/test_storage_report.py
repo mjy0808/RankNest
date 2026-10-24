@@ -65,6 +65,7 @@ class StorageAndReportTests(unittest.TestCase):
                 root / "reports", "测试日报", captured, sections, statuses, 1,
                 [], run_id, "abc123",
                 themes=[{
+                    "segment": "app",
                     "key": "focused_utility", "label": "高频轻工具", "count": 2,
                     "validated_count": 1, "average_score": 80.0, "average_fit": 90.0,
                     "examples": ["Small Wonder", "Another Tool"], "signal": "测试主题信号",
@@ -92,6 +93,8 @@ class StorageAndReportTests(unittest.TestCase):
             self.assertIn("early_signal_score", payload["sections"]["app"][0])
             self.assertIn("competition_score", payload["sections"]["app"][0])
             self.assertEqual(payload["themes"][0]["label"], "高频轻工具")
+            self.assertEqual(payload["themes_by_segment"]["app"][0]["label"], "高频轻工具")
+            self.assertEqual(payload["themes_by_segment"]["mobile_game"], [])
 
     def test_legacy_steam_history_is_loaded_into_non_mobile_segment(self) -> None:
         candidate = Candidate("steam", "legacy", "Legacy Puzzle", "game")
