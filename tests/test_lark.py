@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from unittest.mock import patch
 
-from app_radar.lark import _already_sent, _mark_sent, build_card, build_failure_card, main, send_card
+from app_radar.lark import _already_sent, _mark_sent, _top_lines, build_card, build_failure_card, main, send_card
 
 
 class LarkTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class LarkTests(unittest.TestCase):
             "run_id": 7,
             "total_candidates": 2549,
             "source_status": [{"state": "healthy"}, {"state": "failed"}],
-            "themes": [{"label": "高频轻工具", "count": 3}],
+            "themes": [{"segment": "app", "label": "高频轻工具", "count": 3}],
             "backtest": {
                 "horizons": {
                     "7": {"confirmation_rate": 60, "confirmed": 12, "total": 20}
@@ -59,6 +59,22 @@ class LarkTests(unittest.TestCase):
         card = build_failure_card("https://github.com/example/runs/1", "build=failure")
         self.assertIn("build=failure", str(card))
         self.assertIn("https://github.com/example/runs/1", str(card))
+
+    def test_themes_follow_their_own_category_heading(self) -> None:
+        self.payload["themes"].extend([
+            {"segment": "mobile_game", "label": "短回合益智", "count": 2},
+            {"segment": "non_mobile_game", "label": "维修与模拟体验", "count": 2},
+        ])
+        self.payload["sections"]["mobile_game"] = [{"name": "Mobile Puzzle"}]
+        self.payload["sections"]["non_mobile_game"] = [{"name": "Desktop Repair"}]
+        content = "\n".join(_top_lines(self.payload))
+        app, rest = content.split("**手游 Top 1**", 1)
+        mobile, desktop = rest.split("**非手游 Top 1**", 1)
+        self.assertIn("高频轻工具", app)
+        self.assertNotIn("短回合益智", app)
+        self.assertIn("短回合益智", mobile)
+        self.assertNotIn("维修与模拟体验", mobile)
+        self.assertIn("维修与模拟体验", desktop)
 
     def test_same_day_state_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

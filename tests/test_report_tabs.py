@@ -15,13 +15,29 @@ class _ReportElements(HTMLParser):
         super().__init__()
         self.tabs: list[dict[str, str | None]] = []
         self.panels: list[dict[str, str | None]] = []
+        self.section_stack: list[str | None] = []
+        self.theme_locations: list[tuple[str | None, str | None]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
+        if tag == "section":
+            self.section_stack.append(
+                attributes.get("id") if attributes.get("role") == "tabpanel"
+                else self.section_stack[-1] if self.section_stack else None
+            )
+        if "themes" in (attributes.get("class") or "").split():
+            self.theme_locations.append((
+                self.section_stack[-1] if self.section_stack else None,
+                attributes.get("data-theme-segment"),
+            ))
         if attributes.get("role") == "tab":
             self.tabs.append(attributes)
         elif attributes.get("role") == "tabpanel":
             self.panels.append(attributes)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "section":
+            self.section_stack.pop()
 
 
 def preview_sections() -> dict[str, list[ScoredCandidate]]:
@@ -54,6 +70,9 @@ class ReportTabsTests(unittest.TestCase):
                 elements.feed(body)
                 self.assertEqual(len(elements.tabs), 3)
                 self.assertEqual(len(elements.panels), 3)
+                self.assertEqual(elements.theme_locations, [
+                    (f"panel-{segment}", segment) for segment in preview_sections()
+                ])
                 for index, (tab, panel) in enumerate(zip(elements.tabs, elements.panels)):
                     self.assertEqual(tab["aria-controls"], panel["id"])
                     self.assertEqual(panel["aria-labelledby"], tab["id"])

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import ScoredCandidate, SourceStatus
+from .opportunities import build_theme_summaries
 from .scoring import SEGMENT_LABELS
 
 
@@ -284,9 +285,7 @@ def _render_card(index: int, item: ScoredCandidate) -> str:
     """
 
 
-def _render_themes(themes: list[dict[str, Any]]) -> str:
-    if not themes:
-        return ""
+def _render_themes(themes: list[dict[str, Any]], segment: str) -> str:
     cards = "".join(
         f"""
         <div class="theme-card">
@@ -297,7 +296,15 @@ def _render_themes(themes: list[dict[str, Any]]) -> str:
         """
         for theme in themes
     )
-    return f'<section class="themes"><div class="section-title"><span>机会主题</span><small>同类信号聚合</small></div><div class="theme-grid">{cards}</div></section>'
+    content = (
+        f'<div class="theme-grid">{cards}</div>' if themes
+        else '<p class="theme-empty">今天暂未形成集中的机会主题。</p>'
+    )
+    return (
+        f'<section class="themes" data-theme-segment="{segment}">'
+        '<div class="section-title"><span>机会主题</span>'
+        f'<small>{html.escape(SEGMENT_LABELS[segment])} 内同类信号</small></div>{content}</section>'
+    )
 
 
 def _render_backtest(backtest: dict[str, Any]) -> str:
@@ -328,6 +335,8 @@ def render_html(
     history_href: str = "archive/",
     latest_href: str | None = None,
 ) -> str:
+    if themes is None:
+        themes = build_theme_summaries(sections)
     healthy, degraded, failed = _status_summary(statuses)
     total_selected = sum(len(items) for items in sections.values())
     validated_count = sum(
@@ -381,9 +390,13 @@ def render_html(
                 + "".join(_render_card(index, item) for index, item in watch)
             )
         cards = "".join(groups) or '<p class="empty-ranking">今天暂无符合筛选条件的候选。</p>'
+        segment_themes_html = _render_themes(
+            [theme for theme in themes if theme.get("segment") == segment], segment
+        )
         section_html += f"""
         <section class="ranking" id="panel-{segment}" role="tabpanel" aria-labelledby="tab-{segment}" tabindex="0">
           <div class="section-title"><span>{html.escape(SEGMENT_LABELS[segment])}</span><small>独立评分 · Top {len(items)}</small></div>
+          {segment_themes_html}
           {cards}
         </section>
         """
@@ -391,7 +404,6 @@ def render_html(
         '<div class="ranking-tabs" role="tablist" aria-label="产品机会榜单" '
         'data-ranking-tabs hidden>' + "".join(tab_buttons) + '</div>'
     )
-    themes_html = _render_themes(themes or [])
     backtest_html = _render_backtest(backtest or {})
     history_notice = ""
     if not history_days:
@@ -435,6 +447,7 @@ def render_html(
   .summary{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:24px}} .summary div{{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px}} .summary strong{{display:block;font-size:22px}} .summary span{{font-size:12px;color:#bfd0d4}}
   .health{{font-size:12px;color:#bfd0d4;margin-top:12px}} .health b{{color:#7ee0c3}} .notice{{margin:16px 0;background:#fff6d9;color:#6d5312;border:1px solid #f1d987;border-radius:14px;padding:13px 16px}}
   .ranking,.themes,.validation{{margin-top:30px}} .section-title{{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid #173a44;margin:0 2px 12px;padding:0 2px 8px}} .section-title span{{font-size:23px;font-weight:900}} .section-title small{{color:#6d8088}}
+  .ranking>.themes{{margin:18px 0 22px}} .ranking>.themes>.section-title{{border-bottom:1px solid #dce5e7}} .ranking>.themes>.section-title span{{font-size:17px}} .theme-empty{{font-size:12px;color:#718188;padding:8px 4px}}
   .ranking-tabs{{display:flex;gap:8px;position:sticky;top:10px;z-index:10;margin-top:28px;padding:7px;background:#fff;border:1px solid #dce5e7;border-radius:16px;box-shadow:0 5px 18px rgba(25,45,55,.08);overflow-x:auto}} .ranking-tab{{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;min-width:max-content;border:0;border-radius:11px;padding:12px 18px;background:transparent;color:#51656d;font:inherit;font-weight:800;font-size:14px;cursor:pointer}} .ranking-tab span{{padding:1px 7px;border-radius:99px;background:#eaf0f2;font-size:11px}} .ranking-tab[aria-selected="true"]{{background:#173a44;color:#fff}} .ranking-tab[aria-selected="true"] span{{background:#31535b;color:#bdf4e3}} .ranking-tab:focus-visible,.ranking:focus-visible{{outline:3px solid #42b998;outline-offset:3px}} .ranking-tabs+.ranking{{margin-top:18px}} .empty-ranking{{padding:24px;background:#fff;border-radius:14px;color:#718188}}
   .card{{position:relative;display:grid;grid-template-columns:34px 76px 1fr;gap:14px;margin:14px 0;background:#fff;border:1px solid #e3e8eb;border-radius:18px;padding:18px;box-shadow:0 8px 24px rgba(25,45,55,.05)}}
   .nav{{display:flex;gap:10px;margin-top:18px}} .nav a{{color:#d8fff3;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;text-decoration:none;font-size:12px;font-weight:700}}
@@ -454,7 +467,7 @@ def render_html(
     <div class="health"><b>{early_count} 个早期苗头</b> · {validated_count} 个已验证机会 · {watch_count} 个普通观察　|　{healthy} 个健康数据源 · {degraded} 降级 · {failed} 失败</div>
     <nav class="nav">{navigation}</nav>
   </header>
-  {history_notice}{backtest_html}{themes_html}{tabs_html}{section_html}{issues_html}
+  {history_notice}{backtest_html}{tabs_html}{section_html}{issues_html}
   <footer>
     <p><strong>筛选范围：</strong>从 {total_candidates:,} 个跨市场候选中按分榜选出 {total_selected} 个。</p>
     <p><strong>方法：</strong>每个分榜固定保留早期名额，综合上线/待上线时间、首次发现、低评价基数、短期抬升和多市场露头；同主题成熟竞品越多，竞争分越高并自动降权。其余候选继续使用 1/3/7/14/30 日增速、置信度和可借鉴性。政府专属、高合规、博彩、成熟 IP、强网络效应与大型制作产品使用硬门槛排除。只借鉴需求、机制和商业模式，不复制受保护内容。</p>
@@ -473,6 +486,8 @@ def render_text(
     themes: list[dict[str, Any]] | None = None,
     backtest: dict[str, Any] | None = None,
 ) -> str:
+    if themes is None:
+        themes = build_theme_summaries(sections)
     lines = [
         title,
         generated_at.strftime("%Y-%m-%d %H:%M %Z"),
@@ -489,16 +504,17 @@ def render_text(
                 f"({metric['confirmed']}/{metric['total']})"
             )
         lines.append("")
-    if themes:
-        lines.extend(["== 机会主题 ==", ""])
-        for theme in themes:
-            lines.append(
-                f"- {theme['label']}：{theme['count']} 个机会，"
-                f"{theme['validated_count']} 个已验证"
-            )
-        lines.append("")
     for segment, items in sections.items():
         lines.extend([f"== {SEGMENT_LABELS[segment]} Top {len(items)} ==", ""])
+        segment_themes = [theme for theme in themes if theme.get("segment") == segment]
+        if segment_themes:
+            lines.append("机会主题：")
+            for theme in segment_themes:
+                lines.append(
+                    f"- {theme['label']}：{theme['count']} 个机会，"
+                    f"{theme['validated_count']} 个已验证"
+                )
+            lines.append("")
         for index, item in enumerate(items, start=1):
             candidate = item.candidate
             tier = (
@@ -543,6 +559,8 @@ def write_report(
     backtest: dict[str, Any] | None = None,
     retention_days: int = 45,
 ) -> ReportArtifacts:
+    if themes is None:
+        themes = build_theme_summaries(sections)
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_dir = output_dir / "archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
@@ -573,6 +591,10 @@ def write_report(
         "total_candidates": total_candidates,
         "source_status": [status.as_dict() for status in statuses],
         "themes": themes or [],
+        "themes_by_segment": {
+            segment: [theme for theme in themes if theme.get("segment") == segment]
+            for segment in sections
+        },
         "backtest": backtest or {},
         "sections": serialized_sections,
         "items": [item for values in serialized_sections.values() for item in values],
